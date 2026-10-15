@@ -43,6 +43,7 @@ export const mockProjects: Project[] = [
     remote: 'git@github.com:lucky/shop-admin.git',
     baseBranch: 'main',
     integrationBranch: 'ac/integration',
+    testCommand: 'go test ./...',
     description: '商城管理后台：商品、订单、会员三大模块',
     updatedAt: '2026-10-15 08:42',
     tasks: [

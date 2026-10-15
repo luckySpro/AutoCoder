@@ -57,6 +57,7 @@ type Meta struct {
 	SetupCommand      string    `yaml:"setup_command,omitempty" json:"setupCommand"`
 	ScopeAllow        []string  `yaml:"scope_allow,omitempty" json:"scopeAllow"`
 	CreatedAt         time.Time `yaml:"created_at" json:"createdAt"`
+	DeliveredAt       time.Time `yaml:"delivered_at,omitempty" json:"deliveredAt,omitempty"` // 最近一次交付到主分支的时间
 }
 
 // Task 是 .autocoder/tasks/<id>.yaml。
@@ -565,7 +566,11 @@ func NewTask(p *Project, t Task) (*Task, error) {
 		}
 	}
 	if t.Branch == "" {
-		t.Branch = "ac/" + t.ID + "-" + Slug(t.Title)
+		slug := Slug(t.Title)
+		if slug == "task" {
+			slug = t.Kind // 中文标题没有可用的英文名，用任务类型
+		}
+		t.Branch = "ac/" + t.ID + "-" + slug
 	}
 	t.Status = Planned
 	t.Attempts, t.Commits = 0, 0

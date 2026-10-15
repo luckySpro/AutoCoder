@@ -5,8 +5,7 @@ import { scanTools, store, toolName } from './api'
 import { startLive } from './live'
 
 onMounted(() => {
-  scanTools()
-  startLive()
+  scanTools().then(startLive)
 })
 
 const crew = computed(() => store.tools.filter((t) => t.installed && !t.disabled && t.headless?.length))

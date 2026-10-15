@@ -4,7 +4,7 @@
 import { computed } from 'vue'
 import { agent } from '../agents'
 import { toolName } from '../api'
-import { statusMeta } from '../status'
+import { sm } from '../status'
 import type { Project } from '../types'
 
 const props = defineProps<{ project: Project; selected?: string }>()
@@ -66,7 +66,7 @@ const curve = (x1: number, y1: number, x2: number, y2: number) => {
       <line :x1="LABEL + 20" :x2="layout.width - 8" :y1="layout.trunkY" :y2="layout.trunkY" class="trunk integ" />
 
       <g v-for="r in layout.rows" :key="r.t.id" class="lane" :class="{ sel: selected === r.t.id }" :style="{ '--c': r.color }"
-        tabindex="0" role="button" :aria-label="`${r.t.id} ${r.t.title}，${toolName(r.t.assignee)}，${statusMeta[r.t.status].label}`"
+        tabindex="0" role="button" :aria-label="`${r.t.id} ${r.t.title}，${toolName(r.t.assignee)}，${sm(r.t.status).label}`"
         @click="emit('select', r.t.id)" @keydown.enter="emit('select', r.t.id)">
         <rect :x="0" :y="r.y - ROW / 2" :width="layout.width" :height="ROW" class="hit" />
         <text :x="0" :y="r.y - 3" class="title"><tspan class="tid">{{ r.t.id }}</tspan> {{ clip(r.t.title) }}</text>

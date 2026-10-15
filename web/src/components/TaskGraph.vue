@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { agent } from '../agents'
 import { toolName } from '../api'
 import type { Task } from '../types'
-import { statusMeta } from '../status'
+import { sm } from '../status'
 import AgentMark from './AgentMark.vue'
 
 const props = defineProps<{ tasks: Task[]; selected?: string }>()
@@ -62,7 +62,7 @@ const layout = computed(() => {
         <span class="bottom">
           <AgentMark :id="t.assignee" :size="18" />
           <span class="faint small who">{{ toolName(t.assignee) }}</span>
-          <span class="pill" :class="statusMeta[t.status].tone">{{ statusMeta[t.status].label }}</span>
+          <span class="pill" :class="sm(t.status).tone">{{ sm(t.status).label }}</span>
         </span>
         <span class="bar"><span :style="{ width: t.progress + '%' }"></span></span>
       </button>

@@ -161,6 +161,9 @@ func (r *Run) Subscribe(after int64) ([]Event, chan Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var backlog []Event
+	if after > r.seq {
+		after = 0 // 已经是新的一次尝试，序号重新开始
+	}
 	if after > 0 {
 		for _, e := range r.events {
 			if e.Seq > after {

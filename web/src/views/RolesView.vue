@@ -34,9 +34,15 @@ function setSlots(n: number) {
   saved.value = false
 }
 
-function save() {
-  saveAssignments()
-  saved.value = true
+const saveError = ref('')
+async function save() {
+  saveError.value = ''
+  try {
+    await saveAssignments()
+    saved.value = true
+  } catch (e) {
+    saveError.value = (e as Error).message
+  }
 }
 </script>
 
@@ -120,7 +126,29 @@ function save() {
             <span></span>
           </label>
         </div>
+        <div class="panel set rules">
+          <div>
+            <h2>派发规则</h2>
+            <p class="muted small">失败后带着原因自动重试；连续没有输出也没有文件变化判定为卡住，结束进程后重试。项目没有测试命令时，交付前总会等你确认。</p>
+          </div>
+          <div class="nums">
+            <label><span>最多尝试</span><input v-model.number="store.settings.maxAttempts" type="number" min="1" max="10" @input="saved = false" /><em>次</em></label>
+            <label><span>卡住判定</span><input v-model.number="store.settings.idleMinutes" type="number" min="1" max="120" @input="saved = false" /><em>分钟</em></label>
+            <label><span>单次上限</span><input v-model.number="store.settings.timeoutMinutes" type="number" min="5" max="480" @input="saved = false" /><em>分钟</em></label>
+          </div>
+        </div>
+        <div class="panel set">
+          <div>
+            <h2>暂停派发</h2>
+            <p class="muted small">不再启动新任务，正在运行的会跑完。</p>
+          </div>
+          <label class="switch big">
+            <input type="checkbox" v-model="store.settings.paused" aria-label="暂停派发" @change="saved = false" />
+            <span></span>
+          </label>
+        </div>
       </div>
+      <p v-if="saveError" class="error" role="alert">{{ saveError }}</p>
     </template>
   </section>
 </template>
@@ -138,6 +166,13 @@ function save() {
 .score .num { font: 700 44px/1 var(--font-mono); color: var(--ink); letter-spacing: -0.04em; }
 .score small { color: var(--ink-3); font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.08em; }
 .matrix th:not(:first-child), .cell { text-align: center; }
+.rules { flex-direction: column; align-items: stretch; }
+.nums { display: flex; gap: 14px; flex-wrap: wrap; }
+.nums label { display: grid; grid-template-columns: auto 64px auto; align-items: center; gap: 8px; font-size: 13px; }
+.nums span { color: var(--ink-3); }
+.nums em { font-style: normal; color: var(--ink-3); font-size: 12px; }
+.nums input { height: 32px; padding: 0 8px; font: 600 13px var(--font-mono); border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); border-radius: var(--r-sm); width: 64px; }
+.error { color: var(--bad); font-size: 13px; }
 .matrix td { padding-block: 12px; }
 .matrix td:first-child { padding-left: 14px; box-shadow: inset 3px 0 0 var(--c); }
 .cellbox {

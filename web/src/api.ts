@@ -1,7 +1,8 @@
 import { reactive } from 'vue'
 import { mockAssignments, mockIdentity, mockLocal, mockProjects, mockRepos, mockRoles, mockRunning, mockTools, mockUsage } from './mock'
 import type {
-  Assignment, GitIdentity, GitRepo, LocalRepo, Project, RoleId, RoleInfo, RunningTask, Settings, ToolDetection, ToolSpec, UsageRecord,
+  Assignment, CreateProjectRequest, GitIdentity, GitRepo, LocalRepo, Project, Report, RoleId, RoleInfo, RunningTask, RunStat, Settings,
+  Task, TaskInput, ToolDetection, ToolSpec, UsageRecord,
 } from './types'
 
 const ASSIGN_KEY = 'autocoder.assignments'
@@ -56,9 +57,12 @@ export const store = reactive({
   tools: [] as ToolDetection[],
   roles: [] as RoleInfo[],
   assignments: [] as Assignment[],
-  projects: mockProjects as Project[],
-  usage: mockUsage as UsageRecord[],
-  running: mockRunning as RunningTask[],
+  projects: [] as Project[],
+  usage: [] as UsageRecord[],
+  running: [] as RunningTask[],
+  runStats: [] as RunStat[], // 真实服务：每个任务最近一次尝试
+  toolState: {} as Record<string, string>, // 工具冷却 / 等待登录
+  loadErrors: [] as string[],
   settings: loadJSON<Settings>(SETTINGS_KEY) ?? { ...DEFAULT_SETTINGS },
 })
 
@@ -70,14 +74,19 @@ function applyTools(t: ToolsResp) {
   store.manifestPath = t.manifestPath
 }
 
-export async function scanTools(refresh = false) {
+export async function scanTools(rescan = false) {
   store.loading = true
   try {
-    applyTools(await call<ToolsResp>('GET', `/api/tools${refresh ? '?refresh=1' : ''}`))
+    applyTools(await call<ToolsResp>('GET', `/api/tools${rescan ? '?refresh=1' : ''}`))
     const r = await call<{ roles: RoleInfo[]; assignments: Assignment[] | null }>('GET', '/api/roles')
     store.roles = r.roles
-    store.assignments = loadJSON<Assignment[]>(ASSIGN_KEY) ?? r.assignments ?? []
-    store.demo = false
+    store.assignments = r.assignments ?? []
+    if (store.demo || !realLoaded) {
+      store.demo = false
+      await loadSettings().catch(() => {})
+      await refresh()
+      startPolling()
+    }
   } catch {
     store.demo = true
     if (!store.tools.length) store.tools = structuredClone(mockTools)
@@ -85,6 +94,11 @@ export async function scanTools(refresh = false) {
     store.manifestPath = '~/.autocoder/tools.yaml'
     store.roles = mockRoles
     store.assignments = loadJSON<Assignment[]>(ASSIGN_KEY) ?? structuredClone(mockAssignments)
+    if (!realLoaded && !store.projects.length) {
+      store.projects = structuredClone(mockProjects)
+      store.usage = mockUsage
+      store.running = structuredClone(mockRunning)
+    }
   } finally {
     store.loading = false
   }
@@ -93,8 +107,8 @@ export async function scanTools(refresh = false) {
 // ---------- 工具清单管理 ----------
 
 export function specOf(t: ToolDetection): ToolSpec {
-  const { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, capability, strengths, disabled } = t
-  return { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, capability, strengths, disabled }
+  const { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, autoArgs, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled } = t
+  return { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, autoArgs, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled }
 }
 
 export async function saveTool(spec: ToolSpec) {
@@ -145,14 +159,28 @@ export async function fetchLocalRepos(): Promise<LocalRepo[]> {
   return (await call<{ repos: LocalRepo[] }>('GET', '/api/git/local')).repos ?? []
 }
 
-// ---------- 角色分配与设置 ----------
+// ---------- 角色分配与设置（真实服务保存在 ~/.autocoder/settings.json）----------
 
-export function saveAssignments() {
-  saveJSON(ASSIGN_KEY, store.assignments)
-  saveJSON(SETTINGS_KEY, store.settings)
+async function loadSettings() {
+  const r = await call<{ settings: Settings & { assignments?: Assignment[] }; assignments: Assignment[] }>('GET', '/api/settings')
+  const { assignments: _saved, ...rest } = r.settings
+  store.settings = rest
+  store.assignments = r.assignments ?? []
 }
 
-export function resetAssignments() {
+export async function saveAssignments(assignments = store.assignments) {
+  if (store.demo) {
+    saveJSON(ASSIGN_KEY, store.assignments)
+    saveJSON(SETTINGS_KEY, store.settings)
+    return
+  }
+  const r = await call<{ settings: Settings; assignments: Assignment[] }>('PUT', '/api/settings', { ...store.settings, assignments })
+  const { assignments: _saved, ...rest } = r.settings as Settings & { assignments?: Assignment[] }
+  store.settings = rest
+  store.assignments = r.assignments
+}
+
+export async function resetAssignments() {
   try {
     localStorage.removeItem(ASSIGN_KEY)
     localStorage.removeItem(SETTINGS_KEY)
@@ -160,8 +188,120 @@ export function resetAssignments() {
     /* ignore */
   }
   store.settings = { ...DEFAULT_SETTINGS }
+  if (!store.demo) await saveAssignments([])
   return scanTools()
 }
+
+// ---------- 项目、任务、运行、计量（真实服务）----------
+
+let realLoaded = false
+let pollTimer: number | undefined
+
+const pad = (n: number) => String(n).padStart(2, '0')
+export const mmdd = (d: Date) => `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`
+// 今天只显示时间，其他日子带上日期
+export function fmtAt(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return mmdd(d) === mmdd(new Date()) ? hhmm(d) : `${mmdd(d)} ${hhmm(d)}`
+}
+export const todayKey = () => (store.demo ? '10-15' : mmdd(new Date()))
+
+type ProjectsResp = { projects: (Project & { reports: Report[] })[]; errors?: string[] }
+
+export async function refresh() {
+  if (store.demo) return
+  const [p, r, u] = await Promise.all([
+    call<ProjectsResp>('GET', '/api/projects'),
+    call<{ runs: RunStat[]; tools: Record<string, string> }>('GET', '/api/runs'),
+    call<{ records: UsageRecord[] }>('GET', '/api/usage'),
+  ])
+  store.projects = p.projects.map((x) => ({
+    ...x,
+    updatedAt: fmtAt(x.updatedAt),
+    remote: x.remote || undefined,
+    tasks: x.tasks.map((t) => ({ ...t, dependsOn: t.dependsOn ?? [], assignee: t.assignee ?? '' })),
+    reports: (x.reports ?? []).map((rp) => ({ ...rp, at: fmtAt(rp.at) })),
+  }))
+  store.loadErrors = p.errors ?? []
+  store.runStats = r.runs
+  store.toolState = r.tools ?? {}
+  store.running = r.runs
+    .filter((x) => x.phase === 'running' || x.phase === 'verifying' || x.phase === 'integrating')
+    .map((x) => ({ tool: x.tool, projectId: x.projectId, taskId: x.taskId, role: x.role, startedAt: hhmm(new Date(x.startedAt)) }))
+  store.usage = u.records.map((x) => ({ ...x, at: `${mmdd(new Date(x.at))} ${hhmm(new Date(x.at))}` }))
+  realLoaded = true
+}
+
+function startPolling() {
+  if (pollTimer) return
+  pollTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') refresh().catch(() => {})
+  }, 2500)
+}
+
+async function mutate<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const r = await call<T>(method, url, body)
+  await refresh().catch(() => {})
+  return r
+}
+
+const pid = (id: string) => encodeURIComponent(id)
+
+export async function createProject(req: CreateProjectRequest): Promise<{ id: string; warnings: string[] }> {
+  if (store.demo) throw new ApiError('预览模式不能添加真实项目', 0)
+  const r = await mutate<{ project: Project; warnings: string[] | null }>('POST', '/api/projects', req)
+  return { id: r.project.id, warnings: r.warnings ?? [] }
+}
+
+export function updateProject(id: string, patch: Partial<Pick<Project, 'description' | 'testCommand' | 'setupCommand'>>) {
+  return mutate<Project>('PATCH', `/api/projects/${pid(id)}`, patch)
+}
+
+export function removeProject(id: string) {
+  return mutate('DELETE', `/api/projects/${pid(id)}`)
+}
+
+export async function createTask(projectId: string, input: TaskInput): Promise<Task> {
+  if (store.demo) {
+    const p = store.projects.find((x) => x.id === projectId)!
+    const id = `T${p.tasks.reduce((n, t) => Math.max(n, Number(t.id.replace(/\D/g, '')) || 0), 0) + 1}`
+    const t: Task = {
+      ...input, id, assignee: input.assignee ?? '', status: input.dependsOn.length ? 'planned' : 'ready',
+      branch: `ac/${id}-task`, progress: 0, commits: 0, attempts: 0,
+    }
+    p.tasks.push(t)
+    return t
+  }
+  return mutate<Task>('POST', `/api/projects/${pid(projectId)}/tasks`, input)
+}
+
+export async function updateTask(projectId: string, taskId: string, input: Partial<TaskInput>) {
+  if (store.demo) {
+    const t = store.projects.find((x) => x.id === projectId)?.tasks.find((x) => x.id === taskId)
+    if (t) Object.assign(t, input)
+    return
+  }
+  return mutate<Task>('PATCH', `/api/projects/${pid(projectId)}/tasks/${pid(taskId)}`, input)
+}
+
+export async function taskAction(projectId: string, taskId: string, action: 'retry' | 'cancel' | 'approve') {
+  if (store.demo) throw new ApiError('预览模式不能派发任务，请在本机运行 AutoCoder', 0)
+  return mutate('POST', `/api/projects/${pid(projectId)}/tasks/${pid(taskId)}/${action}`)
+}
+
+export async function deliverProject(projectId: string): Promise<{ status: string; detail?: string; commit?: string; note?: string }> {
+  if (store.demo) throw new ApiError('预览模式不能交付，请在本机运行 AutoCoder', 0)
+  return mutate('POST', `/api/projects/${pid(projectId)}/deliver`)
+}
+
+export async function stopRemoteRun(projectId: string, taskId: string) {
+  return mutate('POST', `/api/runs/${pid(projectId)}/${pid(taskId)}/stop`)
+}
+
+export const logURL = (projectId: string, taskId: string, attempt: number) =>
+  `/api/runs/${pid(projectId)}/${pid(taskId)}/log?attempt=${attempt}`
 
 export function toolName(id: string) {
   return store.tools.find((t) => t.id === id)?.name ?? id

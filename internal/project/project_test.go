@@ -46,7 +46,7 @@ func TestCreateAdoptReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.ID != "T1" || b.ID != "T2" || a.Branch != "ac/T1-order-api" || b.Branch != "ac/T2-task" {
+	if a.ID != "T1" || b.ID != "T2" || a.Branch != "ac/T1-order-api" || b.Branch != "ac/T2-feature" {
 		t.Fatalf("%s %s %s %s", a.ID, b.ID, a.Branch, b.Branch)
 	}
 	a.DependsOn = []string{b.ID}

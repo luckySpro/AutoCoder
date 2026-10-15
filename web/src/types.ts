@@ -19,6 +19,11 @@ export interface ToolSpec {
   versionArgs?: string[]
   headless?: string[]
   usageArgs?: string[] // 有值表示能输出精确的 token 用量
+  autoArgs?: string[] // 无人值守：免确认、限定在工作目录内修改
+  streamArgs?: string[] // 输出事件流（实时查看过程），设置后代替 usageArgs
+  readonlyArgs?: string[] // 只读模式，用于规划与评审
+  authErrors?: string[] // 输出中表示"未登录"的关键字
+  limitErrors?: string[] // 输出中表示"限流 / 额度用完"的关键字
   capability: number
   strengths: string[]
   disabled: boolean
@@ -42,6 +47,10 @@ export interface Assignment {
 export interface Settings {
   concurrency: number // 同时运行的工具进程数，默认 3，最多 5
   autoMerge: boolean // 测试通过后由项目管理直接合并到主分支
+  maxAttempts?: number // 每个任务最多尝试次数
+  idleMinutes?: number // 连续无输出多久判定为卡住
+  timeoutMinutes?: number // 单次尝试最长时间
+  paused?: boolean // 暂停派发
 }
 
 export interface TokenUsage {
@@ -70,8 +79,11 @@ export type TaskStatus =
   | 'running' // 开发中
   | 'testing' // 测试中
   | 'review' // 待评审/待集成
+  | 'integrating' // 集成中
   | 'merged' // 已合并到集成分支
-  | 'blocked' // 受阻，需要项目管理处理
+  | 'blocked' // 受阻：重试用完
+  | 'waiting-user' // 等你处理
+  | 'cancelled' // 已取消
 
 export interface Task {
   id: string
@@ -82,8 +94,28 @@ export interface Task {
   status: TaskStatus
   dependsOn: string[]
   branch: string
-  progress: number // 0-100
+  progress: number // 0-100，只表示阶段
   commits: number
+  description?: string
+  scope?: string[]
+  acceptance?: string[]
+  verify?: string[]
+  attempts?: number
+  lastError?: string
+  waiting?: string // 等你处理时的说明
+}
+
+// 新建 / 修改任务时提交的字段
+export interface TaskInput {
+  title: string
+  description?: string
+  kind: Task['kind']
+  role: RoleId
+  assignee?: string
+  dependsOn: string[]
+  scope: string[]
+  acceptance: string[]
+  verify: string[]
 }
 
 export interface Report {
@@ -94,6 +126,12 @@ export interface Report {
   status: TaskStatus
   summary: string
   commit?: string
+  attempt?: number
+  verify?: string
+  tokens?: number
+  files?: number
+  added?: number
+  removed?: number
 }
 
 export interface Project {
@@ -107,6 +145,41 @@ export interface Project {
   updatedAt: string
   tasks: Task[]
   reports: Report[]
+  testCommand?: string
+  setupCommand?: string
+  deliverable?: boolean // 全部任务已合并，可以交付到主分支
+  deliverNote?: string
+}
+
+// 添加项目
+export interface CreateProjectRequest {
+  source: 'github' | 'url' | 'local' | 'new'
+  repo?: string
+  url?: string
+  path: string
+  name?: string
+  baseBranch?: string
+  createRemote?: boolean
+  description?: string
+  testCommand?: string
+}
+
+// 一次尝试的状态栏（GET /api/runs）
+export interface RunStat {
+  projectId: string
+  taskId: string
+  tool: string
+  role: RoleId
+  attempt: number
+  startedAt: number
+  lastActivity: number
+  phase: 'running' | 'verifying' | 'integrating' | 'done' | 'failed' | 'stopped' | 'waiting'
+  files: string[]
+  added: number
+  removed: number
+  tokens: number
+  exit?: number
+  result?: string
 }
 
 // 本机 git / GitHub 身份

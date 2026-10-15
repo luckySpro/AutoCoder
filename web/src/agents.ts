@@ -8,6 +8,7 @@ const known: Record<string, { color: string; mark: string }> = {
   'copilot-cli': { color: '#66788f', mark: 'Co' },
   opencode: { color: '#c98612', mark: 'Oc' },
   aider: { color: '#13909c', mark: 'Ai' },
+  autocoder: { color: '#3d3a33', mark: 'AC' }, // 编排器自己的记录（交付等）
 }
 const spare = ['#c2703d', '#5a9e3a', '#b85cc9', '#3b8fb0', '#c9a227', '#d0566c']
 

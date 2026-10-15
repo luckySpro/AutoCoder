@@ -1,9 +1,9 @@
 // 运行中 CLI 进程的实时输出。
-// 真实服务（M2）通过 SSE `GET /api/runs/{run}/stream` 推送，断线时带上最后的序号续传（见 DESIGN §6.4）。
-// 目前没有真实进程，这里按脚本模拟输出流，界面与真实数据使用同一套结构。
+// 真实服务通过 SSE `GET /api/runs/{项目}/{任务}/stream` 推送，断线后浏览器带上最后的序号自动续传（DESIGN §6.4）。
+// 连不上本机服务的演示模式下，按脚本模拟输出流；两者使用同一套结构。
 import { reactive, ref } from 'vue'
-import { store } from './api'
-import type { RunningTask } from './types'
+import { stopRemoteRun, store } from './api'
+import type { RunningTask, RunStat } from './types'
 
 export type ActKind = 'say' | 'read' | 'edit' | 'run' | 'usage' | 'warn'
 export type Tone = 'ok' | 'bad' | 'dim' | 'cmd' | 'warn'
@@ -27,6 +27,8 @@ export interface LiveRun {
   removed: number
   tokens: number
   state: 'running' | 'stopped'
+  phase: string // running | verifying | integrating | done | failed | stopped | waiting
+  result?: string
 }
 
 interface Step { kind: ActKind; text: string; meta?: string; tone?: Tone; raw: (string | [string, Tone] | [string, Tone, 'err'])[]; file?: string; add?: number; del?: number; tok?: number; gap: number }
@@ -86,7 +88,7 @@ function create(r: RunningTask): LiveRun {
   const run: LiveRun = {
     taskId: r.taskId, projectId: r.projectId, tool: r.tool, attempt: r.tool === 'codex' ? 2 : 1,
     startedAt: Date.now() - (r.tool === 'codex' ? 7 : 11) * 60_000, lastActivity: Date.now(),
-    acts: [], raw: [], files: [], added: 0, removed: 0, tokens: 0, state: 'running',
+    acts: [], raw: [], files: [], added: 0, removed: 0, tokens: 0, state: 'running', phase: 'running',
   }
   // 打开时先补发已经发生的一段输出
   const pre = Math.min(5, script.length)
@@ -110,6 +112,7 @@ function tick() {
 }
 
 export function startLive() {
+  if (!store.demo) return
   for (const r of store.running) {
     const key = runKey(r.projectId, r.taskId)
     if (!runs.has(key)) runs.set(key, create(r))
@@ -117,10 +120,15 @@ export function startLive() {
   if (!timer) timer = window.setInterval(tick, 1000)
 }
 
-export function stopRun(key: string) {
+export async function stopRun(key: string) {
   const run = runs.get(key)
   if (!run || run.state !== 'running') return
+  if (!store.demo) {
+    await stopRemoteRun(run.projectId, run.taskId)
+    return
+  }
   run.state = 'stopped'
+  run.phase = 'stopped'
   const at = Date.now()
   run.acts.push({ seq: ++seq, at, kind: 'warn', text: '已停止：进程组已结束，改动作为 WIP 保留在任务分支上。', tone: 'warn' })
   run.raw.push({ seq: ++seq, at, text: '^C 已由 AutoCoder 停止（SIGTERM → 进程组）', tone: 'warn' })
@@ -135,4 +143,85 @@ export function fmtDuration(ms: number) {
 export function clock(at: number) {
   const d = new Date(at)
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':')
+}
+
+// ---------- 真实服务：SSE 订阅（按需打开，避免占满浏览器的连接数）----------
+
+interface ServerEvent { seq: number; at: number; type: 'raw' | 'act' | 'stat'; text?: string; tone?: Tone; err?: boolean; kind?: ActKind; meta?: string; stat?: RunStat }
+
+const sources = new Map<string, { es: EventSource; refs: number }>()
+const ACTIVE = ['running', 'verifying', 'integrating']
+
+// 是否有可看的运行记录
+export function hasRun(projectId: string, taskId: string) {
+  const key = runKey(projectId, taskId)
+  return store.demo ? runs.has(key) : store.runStats.some((r) => runKey(r.projectId, r.taskId) === key)
+}
+
+function blank(projectId: string, taskId: string): LiveRun {
+  const st = store.runStats.find((r) => r.projectId === projectId && r.taskId === taskId)
+  return {
+    taskId, projectId, tool: st?.tool ?? '', attempt: st?.attempt ?? 0, startedAt: st?.startedAt ?? Date.now(),
+    lastActivity: st?.lastActivity ?? Date.now(), acts: [], raw: [], files: st?.files ?? [], added: st?.added ?? 0,
+    removed: st?.removed ?? 0, tokens: st?.tokens ?? 0, state: st && ACTIVE.includes(st.phase) ? 'running' : 'stopped',
+    phase: st?.phase ?? 'running', result: st?.result,
+  }
+}
+
+function applyEvent(key: string, e: ServerEvent) {
+  const run = runs.get(key)
+  if (!run) return
+  if (e.type === 'stat' && e.stat) {
+    const s = e.stat
+    if (run.attempt && s.attempt !== run.attempt) {
+      run.acts = []
+      run.raw = []
+    }
+    Object.assign(run, {
+      tool: s.tool, attempt: s.attempt, startedAt: s.startedAt, lastActivity: s.lastActivity, files: s.files ?? [],
+      added: s.added, removed: s.removed, tokens: s.tokens, phase: s.phase, result: s.result,
+      state: ACTIVE.includes(s.phase) ? 'running' : 'stopped',
+    })
+    return
+  }
+  if (run.raw.some((x) => x.seq === e.seq) || run.acts.some((x) => x.seq === e.seq)) return
+  if (e.type === 'raw') {
+    run.raw.push({ seq: e.seq, at: e.at, text: e.text ?? '', tone: e.tone, err: e.err })
+    if (run.raw.length > 2000) run.raw.splice(0, run.raw.length - 2000)
+  } else if (e.type === 'act' && e.kind) {
+    run.acts.push({ seq: e.seq, at: e.at, kind: e.kind, text: e.text ?? '', meta: e.meta, tone: e.tone })
+    if (run.acts.length > 500) run.acts.splice(0, run.acts.length - 500)
+  }
+  run.lastActivity = Math.max(run.lastActivity, e.at)
+}
+
+// retain / release：输出面板挂载时订阅，卸载时退订
+export function retain(key: string) {
+  if (store.demo) return
+  const cur = sources.get(key)
+  if (cur) {
+    cur.refs++
+    return
+  }
+  const [p, t] = key.split('/')
+  if (!runs.has(key)) runs.set(key, blank(p, t))
+  const es = new EventSource(`/api/runs/${encodeURIComponent(p)}/${encodeURIComponent(t)}/stream`)
+  es.onmessage = (m) => {
+    try {
+      applyEvent(key, JSON.parse(m.data))
+    } catch {
+      /* 忽略无法解析的行 */
+    }
+  }
+  sources.set(key, { es, refs: 1 })
+  if (!timer) timer = window.setInterval(() => (now.value = Date.now()), 1000)
+}
+
+export function release(key: string) {
+  const cur = sources.get(key)
+  if (!cur) return
+  if (--cur.refs <= 0) {
+    cur.es.close()
+    sources.delete(key)
+  }
 }

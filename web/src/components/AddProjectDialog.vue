@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { fetchIdentity, fetchLocalRepos, fetchRepos, store, toolName } from '../api'
-import type { GitIdentity, GitRepo, LocalRepo, Project } from '../types'
+import { createProject, fetchIdentity, fetchLocalRepos, fetchRepos, store } from '../api'
+import type { CreateProjectRequest, GitIdentity, GitRepo, LocalRepo, Project } from '../types'
 import Icon from './Icon.vue'
 
 const emit = defineEmits<{ close: []; added: [id: string] }>()
@@ -25,8 +25,10 @@ const form = reactive({
   baseBranch: 'main',
   createRemote: true,
   requirement: '',
+  testCommand: '',
 })
 const error = ref('')
+const busy = ref(false)
 
 onMounted(async () => {
   identity.value = await fetchIdentity().catch(() => undefined)
@@ -79,8 +81,6 @@ const projectPath = computed(() =>
   source.value === 'github' ? form.cloneTo : source.value === 'local' ? form.localPath : `${form.parent.replace(/\/$/, '')}/${form.name || '<名称>'}`,
 )
 
-const lead = computed(() => store.assignments.find((a) => a.roles.includes('lead')))
-
 // 实际要执行的命令，先给用户看
 const commands = computed(() => {
   const c: string[] = []
@@ -92,10 +92,10 @@ const commands = computed(() => {
     c.push(`git init -b ${form.baseBranch} ${p}`)
     if (form.createRemote && ghReady.value) c.push(`gh repo create ${identity.value?.ghLogin}/${form.name || '<名称>'} --private --source ${p} --remote origin`)
   }
-  c.push(`cd ${p}`)
-  c.push('# 写入 .autocoder/project.yaml、plan.md 并提交')
-  c.push(`git switch -c ac/integration ${form.baseBranch}`)
-  c.push(`# 交给 ${lead.value ? toolName(lead.value.toolId) : '项目管理'} 做架构设计与任务拆分`)
+  const wt = `${p.replace(/\/[^/]*$/, '')}/.ac-worktrees/${projectName.value || '<名称>'}/_integration`
+  c.push(`git -C ${p} branch ac/integration ${form.baseBranch}`)
+  c.push(`git -C ${p} worktree add ${wt} ac/integration`)
+  c.push(`# 在集成 worktree 中写入 .autocoder/project.yaml 并提交（不改动你的工作目录）`)
   return c
 })
 
@@ -105,7 +105,7 @@ const ready = computed(() => {
   return /^[A-Za-z0-9._-]+$/.test(form.name)
 })
 
-function submit() {
+async function submit() {
   error.value = ''
   if (!ready.value) {
     error.value = source.value === 'new' ? '项目名称只能包含字母、数字、点、下划线和连字符' : '请先选择一个仓库'
@@ -116,6 +116,29 @@ function submit() {
     error.value = `已经有名为 ${id} 的项目`
     return
   }
+  if (!store.demo) {
+    const req: CreateProjectRequest = {
+      source: source.value === 'github' ? (form.repo ? 'github' : 'url') : source.value,
+      repo: form.repo || undefined,
+      url: form.repo ? undefined : form.pasted || undefined,
+      path: projectPath.value,
+      name: source.value === 'new' ? form.name : undefined,
+      baseBranch: form.baseBranch,
+      createRemote: source.value === 'new' && form.createRemote && !!ghReady.value,
+      description: form.requirement || selectedRepo.value?.description || '',
+      testCommand: form.testCommand,
+    }
+    busy.value = true
+    try {
+      const r = await createProject(req)
+      emit('added', r.id)
+    } catch (e) {
+      error.value = (e as Error).message
+    } finally {
+      busy.value = false
+    }
+    return
+  }
   const remote = source.value === 'github'
     ? (selectedRepo.value?.url ?? form.pasted)
     : source.value === 'local' ? locals.value.find((l) => l.path === form.localPath)?.remote
@@ -123,8 +146,7 @@ function submit() {
   const p: Project = {
     id, name: id, path: projectPath.value, remote, baseBranch: form.baseBranch, integrationBranch: 'ac/integration',
     description: form.requirement || selectedRepo.value?.description || '新项目', updatedAt: '刚刚',
-    tasks: [{ id: 'T1', title: '架构设计与任务拆分', kind: 'infra', role: 'lead', assignee: lead.value?.toolId ?? '', status: 'ready', dependsOn: [], branch: 'ac/T1-architecture', progress: 0, commits: 0 }],
-    reports: [],
+    testCommand: form.testCommand, tasks: [], reports: [],
   }
   store.projects.unshift(p)
   emit('added', id)
@@ -245,8 +267,11 @@ const sources: { id: Source; label: string; hint: string; icon: string }[] = [
               <span class="branch fixed">ac/integration</span>
             </div>
           </div>
-          <label class="field">需求描述 <span class="help">交给 {{ lead ? toolName(lead.toolId) : '项目管理' }} 拆分成任务，可稍后再填</span>
+          <label class="field">项目说明 <span class="help">会写进每个任务的说明里，可稍后修改</span>
             <textarea v-model="form.requirement" rows="2" placeholder="例如：商城后台，包含商品、订单、会员管理"></textarea>
+          </label>
+          <label class="field">测试命令 <span class="help">每个任务合并前和最终交付前都会运行；留空时交付需要你确认</span>
+            <input v-model.trim="form.testCommand" class="mono" placeholder="go test ./...  或  npm test" />
           </label>
           <details class="cmds">
             <summary>将执行的命令</summary>
@@ -259,7 +284,7 @@ const sources: { id: Source; label: string; hint: string; icon: string }[] = [
         <span class="small" :class="error ? 'err' : 'faint'">{{ error || (projectName ? `项目：${projectName}` : '选择或填写一个仓库') }}</span>
         <span class="actions">
           <button type="button" class="btn" @click="emit('close')">取消</button>
-          <button type="submit" class="btn primary" :disabled="!ready">添加项目</button>
+          <button type="submit" class="btn primary" :disabled="!ready || busy">{{ busy ? (source === 'github' ? '克隆中…' : '添加中…') : '添加项目' }}</button>
         </span>
       </footer>
     </form>

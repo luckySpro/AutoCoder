@@ -23,14 +23,16 @@ func deliverable(p *project.Project) (bool, string) {
 	for _, t := range p.Tasks {
 		switch t.Status {
 		case project.Merged:
-			merged++
+			if t.UpdatedAt.After(p.DeliveredAt) {
+				merged++
+			}
 		case project.Cancelled:
 		default:
 			return false, "还有任务没有合并"
 		}
 	}
 	if merged == 0 {
-		return false, "还没有已合并的任务"
+		return false, "没有新合并的任务"
 	}
 	return true, ""
 }
@@ -137,6 +139,11 @@ func (e *Engine) Deliver(ctx context.Context, projectID string) (Delivery, error
 	} else if _, err := gitops.Run(ctx, p.Path, "update-ref", "refs/heads/"+base, sha, oldBase); err != nil {
 		return d, fmt.Errorf("更新 %s 失败：%w", base, err)
 	}
+	e.Store.Lock()
+	p.DeliveredAt = time.Now()
+	_ = project.SaveMeta(p)
+	_ = project.CommitState(ctx, p, "记录交付时间")
+	e.Store.Unlock()
 	e.addReport(p, fmt.Sprintf("已交付到 %s：%s", base, notePath), short(sha))
 	return d, nil
 }

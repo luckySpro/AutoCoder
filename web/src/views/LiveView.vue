@@ -7,7 +7,7 @@ import { runKey, runs } from '../live'
 
 const route = useRoute()
 const focusId = computed(() => route.query.run as string | undefined)
-const list = computed(() => store.running.map((r) => runKey(r.projectId, r.taskId)).filter((k) => runs.has(k)))
+const list = computed(() => store.running.map((r) => runKey(r.projectId, r.taskId)).filter((k) => !store.demo || runs.has(k)))
 const free = computed(() => Math.max(0, store.settings.concurrency - store.running.length))
 
 watch(focusId, async (id) => {
@@ -40,7 +40,7 @@ watch(focusId, async (id) => {
 <style scoped>
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 16px; align-items: start; }
 .free {
-  display: grid; place-content: center; gap: 4px; text-align: center; min-height: 160px; border-radius: var(--r-lg);
+  display: grid; place-content: center; gap: 4px; text-align: center; min-height: 160px;
   border: 1.5px dashed var(--line-strong); color: var(--ink-3);
 }
 .free .mono { font-weight: 600; color: var(--ink-2); }

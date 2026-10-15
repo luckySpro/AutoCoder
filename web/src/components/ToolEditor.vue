@@ -21,6 +21,11 @@ const f = reactive({
   versionArgs: join(props.tool?.versionArgs ?? ['--version']),
   headless: join(props.tool?.headless ?? ['-p', '{prompt}']),
   usageArgs: join(props.tool?.usageArgs),
+  autoArgs: join(props.tool?.autoArgs),
+  streamArgs: join(props.tool?.streamArgs),
+  readonlyArgs: join(props.tool?.readonlyArgs),
+  authErrors: (props.tool?.authErrors ?? []).join('\n'),
+  limitErrors: (props.tool?.limitErrors ?? []).join('\n'),
   paths: [...new Set(Object.values(props.tool?.paths ?? {}).flat())].join('\n'),
   capability: props.tool?.capability ?? 70,
   strengths: [...(props.tool?.strengths ?? ['coding'])],
@@ -43,18 +48,28 @@ const errors = computed(() => {
 })
 
 const firstCmd = computed(() => split(f.commands)[0] || '<命令>')
+// 与后端 Tool.Args 一致：无人值守与事件流参数插在提示词之前（提示词前紧挨的选项如 -p 一起后移）
 const preview = computed(() => {
-  const args = split(f.headless).map((a) => (a === '{prompt}' ? '"<任务说明>"' : a))
-  return [firstCmd.value, ...args, ...split(f.usageArgs)].join(' ')
+  const h = split(f.headless)
+  const extra = [...split(f.autoArgs), ...(split(f.streamArgs).length ? split(f.streamArgs) : split(f.usageArgs))]
+  let at = h.indexOf('{prompt}')
+  if (at < 0) at = h.length
+  else if (at > 0 && h[at - 1].startsWith('-')) at--
+  const args = [...h.slice(0, at), ...extra, ...h.slice(at)].map((a) => (a === '{prompt}' ? '"<任务说明>"' : a))
+  return [firstCmd.value, ...args].join(' ')
 })
+const lines = (s: string) => s.split('\n').map((x) => x.trim()).filter(Boolean)
+const opt = (a: string[]) => (a.length ? a : undefined)
 
 function toSpec(): ToolSpec {
-  const lines = f.paths.split('\n').map((s) => s.trim()).filter(Boolean)
+  const ps = lines(f.paths)
   // 每个系统只检查自己的路径；界面不区分系统，三处写同一份，不存在的路径会被忽略
-  const paths = lines.length ? { darwin: lines, linux: lines, windows: lines } : undefined
+  const paths = ps.length ? { darwin: ps, linux: ps, windows: ps } : undefined
   return {
     id: f.id, name: f.name.trim(), vendor: f.vendor.trim(), commands: split(f.commands), paths,
-    versionArgs: split(f.versionArgs), headless: split(f.headless), usageArgs: split(f.usageArgs).length ? split(f.usageArgs) : undefined,
+    versionArgs: split(f.versionArgs), headless: split(f.headless), usageArgs: opt(split(f.usageArgs)),
+    autoArgs: opt(split(f.autoArgs)), streamArgs: opt(split(f.streamArgs)), readonlyArgs: opt(split(f.readonlyArgs)),
+    authErrors: opt(lines(f.authErrors)), limitErrors: opt(lines(f.limitErrors)),
     capability: Number(f.capability), strengths: f.strengths, disabled: f.disabled,
   }
 }
@@ -115,10 +130,33 @@ const err = (k: string) => (touched.value ? errors.value[k] : '')
             <input id="ed-headless" v-model="f.headless" class="mono" placeholder="-p {prompt}" :aria-invalid="!!err('headless')" />
             <span v-if="err('headless')" class="err">{{ err('headless') }}</span>
           </label>
-          <label class="field">用量参数 <span class="help">让工具输出含 token 用量的结果；留空则按字符数估算</span>
-            <input id="ed-usage" v-model="f.usageArgs" class="mono" placeholder="--output-format json" />
+          <label class="field">无人值守参数 <span class="help">免确认、只在任务目录里修改；没有它工具可能停下来等你回答</span>
+            <input v-model="f.autoArgs" class="mono" placeholder="--permission-mode acceptEdits" />
           </label>
+          <div class="grid2">
+            <label class="field">事件流参数 <span class="help">实时查看过程用</span>
+              <input v-model="f.streamArgs" class="mono" placeholder="--output-format stream-json" />
+            </label>
+            <label class="field">用量参数 <span class="help">没有事件流时使用；都留空则估算</span>
+              <input id="ed-usage" v-model="f.usageArgs" class="mono" placeholder="--output-format json" />
+            </label>
+          </div>
           <div class="preview"><span class="faint">派发时执行</span><code>{{ preview }}</code></div>
+        </fieldset>
+
+        <fieldset class="group">
+          <legend>只读与异常识别</legend>
+          <label class="field">只读参数 <span class="help">规划与评审时代替无人值守参数</span>
+            <input v-model="f.readonlyArgs" class="mono" placeholder="--permission-mode plan" />
+          </label>
+          <div class="grid2">
+            <label class="field">"未登录"关键字 <span class="help">每行一个，不分大小写</span>
+              <textarea v-model="f.authErrors" class="mono" rows="3" placeholder="not logged in"></textarea>
+            </label>
+            <label class="field">"限流 / 额度用完"关键字
+              <textarea v-model="f.limitErrors" class="mono" rows="3" placeholder="rate limit&#10;429"></textarea>
+            </label>
+          </div>
         </fieldset>
 
         <fieldset class="group">
