@@ -12,12 +12,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/luckySpro/AutoCoder/internal/dispatch"
 	"github.com/luckySpro/AutoCoder/internal/gitinfo"
+	"github.com/luckySpro/AutoCoder/internal/project"
 	"github.com/luckySpro/AutoCoder/internal/roles"
 	"github.com/luckySpro/AutoCoder/internal/server"
+	"github.com/luckySpro/AutoCoder/internal/settings"
 	"github.com/luckySpro/AutoCoder/internal/toolscan"
 )
 
@@ -34,12 +38,24 @@ func main() {
 	case "tools":
 		printTools(*manifest)
 	case "", "serve":
-		srv := &server.Server{ManifestPath: *manifest, Scanner: toolscan.NewScanner(), Git: gitinfo.New(), Version: version}
+		ctx := context.Background()
+		home := filepath.Join(userHome(), ".autocoder")
+		store, loadErrs := project.Open(ctx, home)
+		srv := &server.Server{ManifestPath: *manifest, Scanner: toolscan.NewScanner(), Git: gitinfo.New(), Version: version,
+			Projects: store, Settings: &settings.File{Path: filepath.Join(home, "settings.json")}}
+		for _, e := range loadErrs {
+			log.Printf("加载项目失败：%v", e)
+			srv.LoadErrors = append(srv.LoadErrors, e.Error())
+		}
+		srv.Engine = &dispatch.Engine{Store: store, Settings: srv.Settings, LogDir: filepath.Join(home, "logs"),
+			Tools: func(ctx context.Context) []toolscan.Detection { t, _, _ := srv.Scan(ctx, false); return t }}
 		// 启动即检测一次，结果缓存给界面使用。
-		tools, _, err := srv.Scan(context.Background(), true)
+		tools, _, err := srv.Scan(ctx, true)
 		if err != nil {
 			log.Fatal(err)
 		}
+		srv.Engine.Start(ctx)
+		log.Printf("已加载 %d 个项目", len(store.Projects()))
 		n := 0
 		for _, t := range tools {
 			if t.Installed {
@@ -53,6 +69,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "未知命令 %q\n", flag.Arg(0))
 		os.Exit(2)
 	}
+}
+
+func userHome() string {
+	h, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal("找不到用户目录：", err)
+	}
+	return h
 }
 
 func printTools(manifest string) {

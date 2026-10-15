@@ -14,8 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/luckySpro/AutoCoder/internal/dispatch"
 	"github.com/luckySpro/AutoCoder/internal/gitinfo"
+	"github.com/luckySpro/AutoCoder/internal/project"
 	"github.com/luckySpro/AutoCoder/internal/roles"
+	"github.com/luckySpro/AutoCoder/internal/settings"
 	"github.com/luckySpro/AutoCoder/internal/toolscan"
 	"gopkg.in/yaml.v3"
 )
@@ -31,6 +34,11 @@ type Server struct {
 	Scanner      *toolscan.Scanner
 	Git          *gitinfo.Client
 	Version      string
+	// 以下三项为空时只提供工具清单相关接口（测试中使用）。
+	Projects   *project.Store
+	Engine     *dispatch.Engine
+	Settings   *settings.File
+	LoadErrors []string // 启动时加载失败的项目
 
 	mu       sync.Mutex
 	scanned  []toolscan.Detection
@@ -73,8 +81,19 @@ func (s *Server) Handler() http.Handler {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"roles": roles.All, "assignments": roles.Suggest(tools)})
+		as := roles.Suggest(tools)
+		saved := false
+		if s.Settings != nil {
+			st := s.Settings.Get()
+			saved = len(st.Assignments) > 0
+			as = dispatch.Assignments(st, tools)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"roles": roles.All, "assignments": as, "suggested": roles.Suggest(tools), "saved": saved})
 	})
+
+	if s.Projects != nil && s.Engine != nil && s.Settings != nil {
+		s.projectRoutes(mux)
+	}
 
 	// 本机 git / GitHub 身份与仓库，用于添加项目
 	mux.HandleFunc("GET /api/git/identity", func(w http.ResponseWriter, r *http.Request) {

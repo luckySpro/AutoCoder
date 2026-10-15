@@ -31,9 +31,15 @@ type Tool struct {
 	VersionArgs []string            `yaml:"version_args" json:"versionArgs,omitempty"`
 	Headless    []string            `yaml:"headless" json:"headless,omitempty"`
 	UsageArgs   []string            `yaml:"usage_args" json:"usageArgs,omitempty"`
-	Capability  int                 `yaml:"capability" json:"capability"`
-	Strengths   []string            `yaml:"strengths" json:"strengths"`
-	Disabled    bool                `yaml:"disabled,omitempty" json:"disabled"`
+	// 无人值守派发用的参数（见 DESIGN §6.3），都可以在界面上编辑。
+	AutoArgs     []string `yaml:"auto_args,omitempty" json:"autoArgs,omitempty"`         // 免确认、限定在工作目录内修改
+	StreamArgs   []string `yaml:"stream_args,omitempty" json:"streamArgs,omitempty"`     // 输出可解析的事件流；设置后代替 usage_args
+	ReadonlyArgs []string `yaml:"readonly_args,omitempty" json:"readonlyArgs,omitempty"` // 只读模式，用于规划与评审
+	AuthErrors   []string `yaml:"auth_errors,omitempty" json:"authErrors,omitempty"`     // 输出中表示"未登录"的关键字
+	LimitErrors  []string `yaml:"limit_errors,omitempty" json:"limitErrors,omitempty"`   // 输出中表示"限流 / 额度用完"的关键字
+	Capability   int      `yaml:"capability" json:"capability"`
+	Strengths    []string `yaml:"strengths" json:"strengths"`
+	Disabled     bool     `yaml:"disabled,omitempty" json:"disabled"`
 	// Source 标记条目来源：builtin（内置）、modified（内置但被用户修改）、custom（用户新增）。不写入文件。
 	Source string `yaml:"-" json:"source"`
 }
@@ -59,7 +65,41 @@ func (d Detection) Schedulable() bool {
 
 // ExactUsage 表示该工具能输出结构化的 token 用量；否则按字符数估算。
 func (d Detection) ExactUsage() bool {
-	return len(d.UsageArgs) > 0
+	return len(d.UsageArgs) > 0 || len(d.StreamArgs) > 0
+}
+
+// Args 生成派发时的完整参数：调用模板中的 {prompt} 换成任务说明，
+// 无人值守（或只读）参数与事件流/用量参数插在提示词之前（提示词前面紧挨的选项如 -p 一起后移）。
+func (t Tool) Args(prompt string, readonly bool) []string {
+	extra := append([]string(nil), t.AutoArgs...)
+	if readonly {
+		extra = append([]string(nil), t.ReadonlyArgs...)
+	}
+	if len(t.StreamArgs) > 0 {
+		extra = append(extra, t.StreamArgs...)
+	} else {
+		extra = append(extra, t.UsageArgs...)
+	}
+	at := len(t.Headless)
+	for i, a := range t.Headless {
+		if a == "{prompt}" {
+			at = i
+			if i > 0 && strings.HasPrefix(t.Headless[i-1], "-") {
+				at = i - 1
+			}
+			break
+		}
+	}
+	out := make([]string, 0, len(t.Headless)+len(extra))
+	out = append(out, t.Headless[:at]...)
+	out = append(out, extra...)
+	for _, a := range t.Headless[at:] {
+		if a == "{prompt}" {
+			a = prompt
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // Builtin 返回内置清单。

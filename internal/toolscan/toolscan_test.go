@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,6 +94,25 @@ func TestParseVersion(t *testing.T) {
 	for in, want := range cases {
 		if got := ParseVersion(in); got != want {
 			t.Errorf("ParseVersion(%q)=%q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestArgs(t *testing.T) {
+	cases := []struct {
+		tool     Tool
+		readonly bool
+		want     string
+	}{
+		{Tool{Headless: []string{"-p", "{prompt}"}, AutoArgs: []string{"--permission-mode", "acceptEdits"}, StreamArgs: []string{"--output-format", "stream-json"}, UsageArgs: []string{"--output-format", "json"}}, false,
+			"--permission-mode acceptEdits --output-format stream-json -p 做事"},
+		{Tool{Headless: []string{"exec", "{prompt}"}, AutoArgs: []string{"--full-auto"}, UsageArgs: []string{"--json"}}, false, "exec --full-auto --json 做事"},
+		{Tool{Headless: []string{"exec", "{prompt}"}, AutoArgs: []string{"--full-auto"}, ReadonlyArgs: []string{"--sandbox", "read-only"}}, true, "exec --sandbox read-only 做事"},
+		{Tool{Headless: []string{"--message", "{prompt}", "--yes-always"}}, false, "--message 做事 --yes-always"},
+	}
+	for _, c := range cases {
+		if got := strings.Join(c.tool.Args("做事", c.readonly), " "); got != c.want {
+			t.Errorf("Args = %q, want %q", got, c.want)
 		}
 	}
 }
