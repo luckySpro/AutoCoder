@@ -1,151 +1,146 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import { roleName, store, toolName } from '../api'
-import type { Project } from '../types'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { fmtTokens, store, totalTokens } from '../api'
+import AddProjectDialog from '../components/AddProjectDialog.vue'
+import AgentMark from '../components/AgentMark.vue'
+import Icon from '../components/Icon.vue'
+import { statusMeta } from '../status'
+import type { Project, TaskStatus } from '../types'
 
-const open = ref(false)
-const form = reactive({
-  name: '',
-  mode: 'new' as 'new' | 'clone' | 'existing',
-  path: '~/code/',
-  remote: '',
-  baseBranch: 'main',
-  requirement: '',
-})
-const errors = reactive({ name: '', remote: '' })
+const router = useRouter()
+const adding = ref(false)
 
-function stats(p: Project) {
-  const done = p.tasks.filter((t) => t.status === 'merged').length
-  const blocked = p.tasks.filter((t) => t.status === 'blocked').length
-  return { done, total: p.tasks.length, blocked, pct: p.tasks.length ? Math.round((done / p.tasks.length) * 100) : 0 }
+const all = computed(() => store.projects.flatMap((p) => p.tasks))
+const count = (s: TaskStatus[]) => all.value.filter((t) => s.includes(t.status)).length
+const tokensToday = computed(() => store.usage.filter((u) => u.at.startsWith('10-15')).reduce((n, u) => n + totalTokens(u.usage), 0))
+
+const stats = computed(() => [
+  { label: '进行中的任务', value: count(['running', 'testing']), tone: 'run' },
+  { label: '待集成', value: count(['review']), tone: 'accent' },
+  { label: '受阻', value: count(['blocked']), tone: 'bad' },
+  { label: '今日 Token', value: fmtTokens(tokensToday.value), tone: '' },
+])
+
+const order: TaskStatus[] = ['merged', 'review', 'testing', 'running', 'ready', 'blocked', 'planned']
+function strip(p: Project) {
+  return [...p.tasks].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))
 }
+const stripLabel = (p: Project) => '任务状态：' + p.tasks.map((t) => `${t.id} ${statusMeta[t.status].label}`).join('，')
+const done = (p: Project) => p.tasks.filter((t) => t.status === 'merged').length
+const crew = (p: Project) => [...new Set(p.tasks.map((t) => t.assignee).filter(Boolean))]
+const tokens = (p: Project) => store.usage.filter((u) => u.projectId === p.id).reduce((n, u) => n + totalTokens(u.usage), 0)
+const blocked = (p: Project) => p.tasks.filter((t) => t.status === 'blocked')
 
-const dir = computed(() => (form.mode === 'existing' ? form.path : `${form.path.replace(/\/$/, '')}/${form.name || '<name>'}`))
-
-// 创建项目时实际要执行的 git 操作，界面上先预览
-const commands = computed(() => {
-  const c: string[] = []
-  if (form.mode === 'new') c.push(`git init -b ${form.baseBranch} ${dir.value}`)
-  if (form.mode === 'clone') c.push(`git clone ${form.remote || '<remote>'} ${dir.value}`)
-  c.push(`cd ${dir.value}`)
-  c.push('mkdir -p .autocoder/tasks .autocoder/reports  # 写入 project.yaml 与 plan.md')
-  c.push(`git add .autocoder && git commit -m "chore(autocoder): 初始化项目"`)
-  c.push(`git branch ac/integration ${form.baseBranch}`)
-  if (form.mode === 'new' && form.remote) c.push(`git remote add origin ${form.remote}`)
-  const lead = store.assignments.find((a) => a.roles.includes('lead'))
-  c.push(`# 交给 ${lead ? toolName(lead.toolId) : '项目管理'} 进行架构设计与任务拆分（最多同时运行 ${store.settings.concurrency} 个工具）`)
-  return c
-})
-
-function submit() {
-  errors.name = /^[a-zA-Z0-9._-]+$/.test(form.name) ? '' : '只能包含字母、数字、点、下划线和连字符'
-  errors.remote = form.mode === 'clone' && !form.remote ? '克隆模式需要填写仓库地址' : ''
-  if (errors.name || errors.remote) return
-  store.projects.unshift({
-    id: form.name, name: form.name, path: dir.value, remote: form.remote || undefined,
-    baseBranch: form.baseBranch, integrationBranch: 'ac/integration',
-    description: form.requirement || '新项目', updatedAt: new Date().toLocaleString(),
-    tasks: [{ id: 'T1', title: '架构设计与任务拆分', kind: 'infra', role: 'lead', assignee: store.assignments.find((a) => a.roles.includes('lead'))?.toolId ?? '', status: 'ready', dependsOn: [], branch: 'ac/T1-architecture', progress: 0, commits: 0 }],
-    reports: [],
-  })
-  open.value = false
-  Object.assign(form, { name: '', remote: '', requirement: '' })
+function added(id: string) {
+  adding.value = false
+  router.push(`/projects/${id}`)
 }
 </script>
 
 <template>
-  <section>
-    <div class="page-head">
+  <section class="page">
+    <header class="page-head">
       <div>
+        <div class="eyebrow">工作台</div>
         <h1>项目</h1>
-        <p>每个项目就是一个 git 仓库；任务对应分支，进度对应提交，集成对应合并。</p>
+        <p class="lede">每个项目都是一个 git 仓库：任务各占一条分支，进度随提交汇报，完成后由项目管理合并到集成分支。</p>
       </div>
-      <button class="btn primary" @click="open = true">＋ 新建项目</button>
+      <button class="btn primary" @click="adding = true"><Icon name="plus" />添加项目</button>
+    </header>
+
+    <div class="stats">
+      <div v-for="s in stats" :key="s.label" class="stat" :class="s.tone">
+        <span class="v num">{{ s.value }}</span>
+        <span class="l">{{ s.label }}</span>
+      </div>
     </div>
 
-    <div class="grid projects">
-      <RouterLink v-for="p in store.projects" :key="p.id" :to="`/projects/${p.id}`" class="card project">
-        <div class="row between">
-          <strong>{{ p.name }}</strong>
-          <span v-if="stats(p).blocked" class="badge danger">{{ stats(p).blocked }} 个受阻</span>
+    <div class="list">
+      <RouterLink v-for="p in store.projects" :key="p.id" :to="`/projects/${p.id}`" class="proj">
+        <div class="id">
+          <h2 class="mono">{{ p.name }}</h2>
+          <p class="muted">{{ p.description }}</p>
+          <div class="row small">
+            <span class="branch"><Icon name="branch" />{{ p.baseBranch }}</span>
+            <span class="faint mono path">{{ p.path }}</span>
+          </div>
         </div>
-        <p class="muted desc">{{ p.description }}</p>
-        <div class="mono faint">{{ p.path }}</div>
-        <div class="row branch">
-          <span class="badge">⎇ {{ p.baseBranch }}</span>
-          <span class="badge">⎇ {{ p.integrationBranch }}</span>
+
+        <div class="progress">
+          <div class="row between small">
+            <span><b class="num">{{ done(p) }}</b><span class="faint"> / {{ p.tasks.length }} 已合并</span></span>
+            <span v-if="blocked(p).length" class="pill bad">{{ blocked(p).map((t) => t.id).join('、') }} 受阻</span>
+          </div>
+          <div class="strip" :aria-label="stripLabel(p)">
+            <span v-for="t in strip(p)" :key="t.id" :class="['seg', t.status]" :title="`${t.id} ${t.title} · ${statusMeta[t.status].label}`"></span>
+          </div>
         </div>
-        <div class="progress" :aria-label="`完成 ${stats(p).pct}%`"><span :style="{ width: stats(p).pct + '%' }"></span></div>
-        <div class="row between small">
-          <span class="muted">{{ stats(p).done }}/{{ stats(p).total }} 个任务已合并</span>
-          <span class="faint">{{ p.updatedAt }}</span>
+
+        <div class="side">
+          <div class="crew">
+            <AgentMark v-for="id in crew(p)" :key="id" :id="id" :size="26" />
+          </div>
+          <div class="small faint num">{{ fmtTokens(tokens(p)) }} token · {{ p.updatedAt }}</div>
         </div>
       </RouterLink>
+
+      <button class="proj add" @click="adding = true">
+        <Icon name="github" :size="22" />
+        <span>
+          <b>从 GitHub 账号添加仓库</b>
+          <span class="muted small">像 Claude Code 一样直接选择仓库，也可以选本机目录或新建</span>
+        </span>
+      </button>
     </div>
 
-    <div v-if="open" class="mask" @click.self="open = false">
-      <form class="dialog card" role="dialog" aria-modal="true" aria-labelledby="new-title" @submit.prevent="submit">
-        <h2 id="new-title">新建项目</h2>
-        <div class="seg" role="radiogroup" aria-label="来源">
-          <label v-for="m in [{ v: 'new', l: '新仓库' }, { v: 'clone', l: '克隆远程' }, { v: 'existing', l: '已有目录' }]" :key="m.v" :class="{ on: form.mode === m.v }">
-            <input type="radio" v-model="form.mode" :value="m.v" />{{ m.l }}
-          </label>
-        </div>
-        <div class="fields">
-          <label class="field">项目名称 *
-            <input v-model.trim="form.name" required placeholder="shop-admin" />
-            <span v-if="errors.name" class="err">{{ errors.name }}</span>
-          </label>
-          <label class="field">{{ form.mode === 'existing' ? '仓库目录' : '父目录' }}
-            <input v-model.trim="form.path" />
-          </label>
-          <label class="field">远程仓库{{ form.mode === 'clone' ? ' *' : '（可选）' }}
-            <input v-model.trim="form.remote" placeholder="git@github.com:you/repo.git" />
-            <span v-if="errors.remote" class="err">{{ errors.remote }}</span>
-          </label>
-          <label class="field">主分支
-            <input v-model.trim="form.baseBranch" />
-          </label>
-          <label class="field wide">需求描述（交给项目管理拆分）
-            <textarea v-model="form.requirement" rows="3" placeholder="例如：做一个商城后台，包含商品、订单、会员管理"></textarea>
-          </label>
-        </div>
-        <div class="preview">
-          <div class="faint small">将执行</div>
-          <pre><code>{{ commands.join('\n') }}</code></pre>
-        </div>
-        <p class="faint small">
-          当前分工：
-          <span v-for="a in store.assignments" :key="a.toolId">{{ a.toolName }}（{{ a.roles.map(roleName).join('、') }}） </span>
-        </p>
-        <div class="row end">
-          <button type="button" class="btn" @click="open = false">取消</button>
-          <button type="submit" class="btn primary">创建</button>
-        </div>
-      </form>
-    </div>
+    <AddProjectDialog v-if="adding" @close="adding = false" @added="added" />
   </section>
 </template>
 
 <style scoped>
-.project { display: grid; gap: 8px; color: var(--text); transition: border-color 0.15s; }
-.project:hover, .project:focus-visible { border-color: var(--primary); }
-.between { justify-content: space-between; }
-.desc { margin: 0; }
-.small { font-size: 12.5px; }
-.progress { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
-.progress span { display: block; height: 100%; background: var(--success); }
-.mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: grid; place-items: center; padding: 16px; z-index: 10; }
-.dialog { width: min(640px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; display: grid; gap: 14px; }
-.dialog h2 { margin: 0; }
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; width: fit-content; }
-.seg label { padding: 6px 14px; cursor: pointer; font-size: 13px; }
-.seg label.on { background: var(--primary-soft); color: var(--primary); }
-.seg input { position: absolute; opacity: 0; pointer-events: none; }
-.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.fields .wide { grid-column: 1 / -1; }
-.err { color: var(--danger); font-size: 12px; }
-.preview pre { margin: 4px 0 0; background: var(--surface-2); padding: 10px 12px; border-radius: var(--radius-sm); overflow-x: auto; font-size: 12px; }
-.end { justify-content: flex-end; }
-@media (max-width: 560px) { .fields { grid-template-columns: 1fr; } }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
+.stat { display: grid; gap: 2px; padding: 16px 18px; border-left: 1px solid var(--line); }
+.stat:first-child { border-left: 0; }
+.stat .v { font: 600 28px/1.1 var(--font-display); letter-spacing: -0.02em; }
+.stat .l { color: var(--ink-3); font-size: 12.5px; }
+.stat.run .v { color: var(--run); }
+.stat.accent .v { color: var(--accent); }
+.stat.bad .v { color: var(--bad); }
+
+.list { display: grid; gap: 10px; }
+.proj {
+  display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: 28px; align-items: center;
+  padding: 18px 20px; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink); text-decoration: none; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.proj:hover { border-color: var(--line-strong); box-shadow: var(--shadow); text-decoration: none; }
+.id { display: grid; gap: 6px; min-width: 0; }
+.id h2 { font-size: 16px; font-weight: 650; }
+.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress { display: grid; gap: 8px; }
+.strip { display: flex; gap: 3px; height: 10px; }
+.seg { flex: 1; border-radius: 3px; background: var(--line); }
+.seg.merged { background: var(--ok); }
+.seg.review { background: var(--accent); }
+.seg.testing { background: var(--warn); }
+.seg.running { background: var(--run); }
+.seg.ready { background: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.seg.blocked { background: var(--bad); }
+.side { display: grid; gap: 8px; justify-items: end; }
+.crew { display: flex; gap: 4px; }
+.add {
+  grid-template-columns: auto 1fr; gap: 14px; border-style: dashed; background: transparent; cursor: pointer;
+  font: inherit; text-align: left; color: var(--ink-2);
+}
+.add span { display: grid; }
+.add b { color: var(--ink); }
+.add:hover { background: var(--surface); }
+@media (max-width: 960px) {
+  .proj { grid-template-columns: 1fr; gap: 14px; }
+  .side { justify-items: start; grid-auto-flow: column; align-items: center; justify-content: space-between; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(3) { border-left: 0; }
+  .stat:nth-child(n+3) { border-top: 1px solid var(--line); }
+}
 </style>

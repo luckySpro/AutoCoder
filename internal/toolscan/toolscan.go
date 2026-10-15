@@ -33,7 +33,9 @@ type Tool struct {
 	UsageArgs   []string            `yaml:"usage_args" json:"usageArgs,omitempty"`
 	Capability  int                 `yaml:"capability" json:"capability"`
 	Strengths   []string            `yaml:"strengths" json:"strengths"`
-	Disabled    bool                `yaml:"disabled" json:"disabled,omitempty"`
+	Disabled    bool                `yaml:"disabled,omitempty" json:"disabled"`
+	// Source 标记条目来源：builtin（内置）、modified（内置但被用户修改）、custom（用户新增）。不写入文件。
+	Source string `yaml:"-" json:"source"`
 }
 
 // Manifest 是工具清单文件。
@@ -60,30 +62,28 @@ func (d Detection) ExactUsage() bool {
 	return len(d.UsageArgs) > 0
 }
 
-// LoadManifest 读取内置清单，并按 id 合并用户清单（userPath 为空或不存在时忽略）。
-func LoadManifest(userPath string) (Manifest, error) {
+// Builtin 返回内置清单。
+func Builtin() Manifest {
 	var m Manifest
 	if err := yaml.Unmarshal(defaultManifest, &m); err != nil {
-		return m, fmt.Errorf("内置清单解析失败: %w", err)
+		panic(fmt.Sprintf("内置清单解析失败: %v", err)) // 由测试保证不会发生
 	}
-	if userPath == "" {
-		return m, nil
+	for i := range m.Tools {
+		m.Tools[i].Source = SourceBuiltin
 	}
-	data, err := os.ReadFile(userPath)
-	if os.IsNotExist(err) {
-		return m, nil
-	}
-	if err != nil {
-		return m, err
-	}
-	var user Manifest
-	if err := yaml.Unmarshal(data, &user); err != nil {
-		return m, fmt.Errorf("用户清单 %s 解析失败: %w", userPath, err)
-	}
-	return Merge(m, user), nil
+	return m
 }
 
-// Merge 以 id 为键，用 override 中的条目替换或追加到 base。
+// LoadManifest 读取内置清单，并按 id 合并用户清单（userPath 为空或不存在时忽略）。
+func LoadManifest(userPath string) (Manifest, error) {
+	user, err := ReadUserManifest(userPath)
+	if err != nil {
+		return Builtin(), err
+	}
+	return Merge(Builtin(), user), nil
+}
+
+// Merge 以 id 为键，用 override 中的条目替换或追加到 base，并标记来源。
 func Merge(base, override Manifest) Manifest {
 	idx := make(map[string]int, len(base.Tools))
 	out := Manifest{Tools: append([]Tool(nil), base.Tools...)}
@@ -92,8 +92,10 @@ func Merge(base, override Manifest) Manifest {
 	}
 	for _, t := range override.Tools {
 		if i, ok := idx[t.ID]; ok {
+			t.Source = SourceModified
 			out.Tools[i] = t
 		} else {
+			t.Source = SourceCustom
 			idx[t.ID] = len(out.Tools)
 			out.Tools = append(out.Tools, t)
 		}
@@ -153,9 +155,6 @@ func (s *Scanner) Scan(ctx context.Context, m Manifest) []Detection {
 
 func (s *Scanner) detect(ctx context.Context, t Tool) Detection {
 	d := Detection{Tool: t}
-	if t.Disabled {
-		return d
-	}
 	for _, c := range t.Commands {
 		if p, err := s.LookPath(c); err == nil {
 			d.Installed, d.Path = true, p

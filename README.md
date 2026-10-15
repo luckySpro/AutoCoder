@@ -8,9 +8,10 @@
 
 ## 当前进度（M0）
 
-- ✅ 工具清单与启动检测（`internal/toolscan`，可用 `~/.autocoder/tools.yaml` 自定义）
+- ✅ 工具清单与启动检测，清单在界面上直接增删改、启停、导入导出（`internal/toolscan`）
 - ✅ 默认角色分配（`internal/roles`）
-- ✅ 界面原型：启动检查、角色分配、项目列表、项目详情（任务图/看板/进度汇报）
+- ✅ 读取本机 git 身份与 GitHub 账号仓库，像 Claude Code 一样添加项目（`internal/gitinfo`）
+- ✅ 界面原型：项目列表、项目详情（分支泳道/依赖图/看板）、Token 用量、角色与运行、工具清单，深浅双主题
 - ⏳ 项目与任务的真实 git 操作、任务派发与汇报解析（见路线图）
 
 ## 快速开始
@@ -34,6 +35,10 @@ npm --prefix web run dev        # Vite 开发服务器，/api 自动转发
 
 ## 截图
 
-| 启动检查 | 项目任务图 |
+| 项目 | 分支泳道（深色） |
 |---|---|
-| ![](docs/screenshots/tools.png) | ![](docs/screenshots/project-graph.png) |
+| ![](docs/screenshots/projects.png) | ![](docs/screenshots/project-lanes-dark.png) |
+| **添加项目** | **工具清单** |
+| ![](docs/screenshots/add-project.png) | ![](docs/screenshots/tools.png) |
+| **编辑工具** | **Token 用量** |
+| ![](docs/screenshots/tool-editor.png) | ![](docs/screenshots/usage.png) |

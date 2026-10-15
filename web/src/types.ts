@@ -9,15 +9,23 @@ export interface RoleInfo {
   strength: string
 }
 
-export interface ToolDetection {
+// 工具清单条目（界面可编辑的部分）
+export interface ToolSpec {
   id: string
   name: string
   vendor: string
   commands: string[]
+  paths?: Record<string, string[]>
+  versionArgs?: string[]
   headless?: string[]
   usageArgs?: string[] // 有值表示能输出精确的 token 用量
   capability: number
   strengths: string[]
+  disabled: boolean
+}
+
+export interface ToolDetection extends ToolSpec {
+  source: 'builtin' | 'modified' | 'custom'
   installed: boolean
   path?: string
   version?: string
@@ -99,4 +107,40 @@ export interface Project {
   updatedAt: string
   tasks: Task[]
   reports: Report[]
+}
+
+// 本机 git / GitHub 身份
+export interface GitIdentity {
+  gitName: string
+  gitEmail: string
+  gitVersion: string
+  ghInstalled: boolean
+  ghLoggedIn: boolean
+  ghLogin?: string
+  ghHost?: string
+}
+
+export interface GitRepo {
+  nameWithOwner: string
+  description: string
+  isPrivate: boolean
+  updatedAt: string
+  url: string
+  defaultBranch: string
+}
+
+export interface LocalRepo {
+  name: string
+  path: string
+  remote?: string
+  branch?: string
+}
+
+// 正在运行的工具进程（占用一个运行槽）
+export interface RunningTask {
+  tool: string
+  projectId: string
+  taskId: string
+  role: RoleId
+  startedAt: string
 }

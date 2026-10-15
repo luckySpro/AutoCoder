@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { agent } from '../agents'
 import { toolName } from '../api'
 import type { Task } from '../types'
 import { statusMeta } from '../status'
+import AgentMark from './AgentMark.vue'
 
 const props = defineProps<{ tasks: Task[]; selected?: string }>()
 const emit = defineEmits<{ select: [id: string] }>()
 
-const W = 190, H = 68, GX = 56, GY = 16
+const W = 200, H = 78, GX = 60, GY = 14
 
-// 按依赖深度分层布局：没有依赖的在第 0 列，其余放在最深依赖的下一列。
+// 按依赖深度分层：没有依赖的在第 0 列，其余放在最深依赖的下一列。
 const layout = computed(() => {
   const byId = new Map(props.tasks.map((t) => [t.id, t]))
   const depth = new Map<string, number>()
   const visit = (id: string, seen = new Set<string>()): number => {
     if (depth.has(id)) return depth.get(id)!
-    if (seen.has(id)) return 0 // 有环时截断，避免死循环
+    if (seen.has(id)) return 0 // 有环时截断
     seen.add(id)
     const t = byId.get(id)
     const d = t && t.dependsOn.length ? Math.max(...t.dependsOn.map((x) => visit(x, seen))) + 1 : 0
@@ -46,20 +48,21 @@ const layout = computed(() => {
       <svg :width="layout.width" :height="layout.height" aria-hidden="true">
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M0,0 L10,5 L0,10 z" fill="var(--text-3)" />
+            <path d="M0,0 L10,5 L0,10 z" class="arrowhead" />
           </marker>
         </defs>
         <path v-for="e in layout.edges" :key="e.key" :d="e.d" class="edge" :class="{ done: e.done }" marker-end="url(#arrow)" />
       </svg>
       <button
-        v-for="t in tasks" :key="t.id" class="node" :class="[statusMeta[t.status].tone, { sel: selected === t.id }]"
-        :style="{ left: layout.pos.get(t.id)!.x + 'px', top: layout.pos.get(t.id)!.y + 'px', width: W + 'px', height: H + 'px' }"
+        v-for="t in tasks" :key="t.id" class="node" :class="{ sel: selected === t.id, [t.status]: true }"
+        :style="{ left: layout.pos.get(t.id)!.x + 'px', top: layout.pos.get(t.id)!.y + 'px', width: W + 'px', height: H + 'px', '--c': agent(t.assignee).color }"
         @click="emit('select', t.id)"
       >
-        <span class="top"><b>{{ t.id }}</b> {{ t.title }}</span>
+        <span class="top"><b class="mono">{{ t.id }}</b><span class="ttl">{{ t.title }}</span></span>
         <span class="bottom">
-          <span class="faint">{{ toolName(t.assignee) }}</span>
-          <span class="st">{{ statusMeta[t.status].label }}</span>
+          <AgentMark :id="t.assignee" :size="18" />
+          <span class="faint small who">{{ toolName(t.assignee) }}</span>
+          <span class="pill" :class="statusMeta[t.status].tone">{{ statusMeta[t.status].label }}</span>
         </span>
         <span class="bar"><span :style="{ width: t.progress + '%' }"></span></span>
       </button>
@@ -71,24 +74,23 @@ const layout = computed(() => {
 .graph-wrap { overflow: auto; padding: 4px; }
 .graph { position: relative; }
 svg { position: absolute; inset: 0; overflow: visible; }
-.edge { fill: none; stroke: var(--border); stroke-width: 1.5; }
-.edge.done { stroke: var(--success); opacity: 0.6; }
+.arrowhead { fill: var(--line-strong); }
+.edge { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
+.edge.done { stroke: var(--ok); opacity: 0.7; }
 .node {
-  position: absolute; display: grid; grid-template-rows: 1fr auto auto; gap: 4px; text-align: left;
-  padding: 8px 10px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border);
-  border-left: 3px solid var(--tone); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer;
+  position: absolute; display: grid; grid-template-rows: auto 1fr auto; gap: 6px; text-align: left;
+  padding: 10px 12px 8px; border-radius: var(--r); border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer;
+  box-shadow: inset 3px 0 0 var(--c);
 }
-.node:hover { border-color: var(--tone); }
-.node.sel { box-shadow: 0 0 0 2px var(--primary); }
-.top { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bottom { display: flex; justify-content: space-between; font-size: 12px; }
-.st { color: var(--tone); }
-.bar { height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
-.bar span { display: block; height: 100%; background: var(--tone); }
-.success { --tone: var(--success); }
-.warning { --tone: var(--warning); }
-.danger { --tone: var(--danger); }
-.info { --tone: var(--info); }
-.primary { --tone: var(--primary); }
-.neutral { --tone: var(--text-3); }
+.node:hover { border-color: var(--line-strong); }
+.node.sel { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--c), var(--ring); }
+.node.planned { background: var(--sunken); }
+.top { display: flex; gap: 6px; min-width: 0; align-items: baseline; }
+.top b { color: var(--c); font-size: 12px; }
+.ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.bottom { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.who { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--c); }
 </style>

@@ -1,5 +1,5 @@
 // 演示数据：项目/任务/汇报暂未接后端；工具检测在后端不可用时也回落到这里。
-import type { Assignment, Project, RoleId, RoleInfo, ToolDetection, UsageRecord } from './types'
+import type { Assignment, GitIdentity, GitRepo, LocalRepo, Project, RoleId, RoleInfo, RunningTask, ToolDetection, UsageRecord } from './types'
 
 export const mockRoles: RoleInfo[] = [
   { id: 'lead', name: '架构与项目管理', description: '负责架构设计、功能与视觉拆分、任务派发、进度汇总与分支集成', strength: 'architecture' },
@@ -13,8 +13,9 @@ const t = (
   id: string, name: string, vendor: string, capability: number, strengths: string[],
   installed: boolean, exact: boolean, version?: string, path?: string,
 ): ToolDetection => ({
-  id, name, vendor, capability, strengths, installed, version, path,
-  commands: [id], headless: ['-p', '{prompt}'], usageArgs: exact ? ['--output-format', 'json'] : undefined,
+  id, name, vendor, capability, strengths, installed, version, path, source: 'builtin', disabled: false,
+  commands: [id === 'claude-code' ? 'claude' : id], versionArgs: ['--version'],
+  headless: ['-p', '{prompt}'], usageArgs: exact ? ['--output-format', 'json'] : undefined,
 })
 
 export const mockTools: ToolDetection[] = [
@@ -50,12 +51,13 @@ export const mockProjects: Project[] = [
       { id: 'T3', title: '订单 API 与状态机', kind: 'feature', role: 'developer', assignee: 'codex', status: 'running', dependsOn: ['T1'], branch: 'ac/T3-order-api', progress: 60, commits: 4 },
       { id: 'T4', title: '后台布局与设计令牌', kind: 'ui', role: 'frontend', assignee: 'cursor-agent', status: 'review', dependsOn: ['T1'], branch: 'ac/T4-layout', progress: 100, commits: 2 },
       { id: 'T5', title: '商品列表与编辑页', kind: 'ui', role: 'frontend', assignee: 'cursor-agent', status: 'ready', dependsOn: ['T2', 'T4'], branch: 'ac/T5-product-ui', progress: 0, commits: 0 },
-      { id: 'T6', title: '商品 API 集成测试', kind: 'test', role: 'tester', assignee: 'codex', status: 'testing', dependsOn: ['T2'], branch: 'ac/T6-product-test', progress: 70, commits: 2 },
+      { id: 'T6', title: '商品 API 集成测试', kind: 'test', role: 'tester', assignee: 'codex', status: 'review', dependsOn: ['T2'], branch: 'ac/T6-product-test', progress: 100, commits: 2 },
       { id: 'T7', title: '订单页面', kind: 'ui', role: 'frontend', assignee: 'cursor-agent', status: 'planned', dependsOn: ['T3', 'T4'], branch: 'ac/T7-order-ui', progress: 0, commits: 0 },
       { id: 'T8', title: '端到端回归', kind: 'test', role: 'tester', assignee: 'codex', status: 'planned', dependsOn: ['T5', 'T7'], branch: 'ac/T8-e2e', progress: 0, commits: 0 },
     ],
     reports: [
-      { id: 'r9', taskId: 'T6', from: 'codex', at: '08:42', status: 'testing', summary: '12 个用例中 11 个通过；分页越界返回 500，已在 T2 分支上提出修复建议', commit: 'a41c9e2' },
+      { id: 'r10', taskId: 'T4', from: 'claude-code', at: '08:47', status: 'review', summary: '开始评审 T4：检查设计令牌命名与暗色对比度' },
+      { id: 'r9', taskId: 'T6', from: 'codex', at: '08:42', status: 'review', summary: '12 个用例全部通过；顺手修复了分页越界返回 500 的问题，等待集成', commit: 'a41c9e2' },
       { id: 'r8', taskId: 'T4', from: 'cursor-agent', at: '08:30', status: 'review', summary: '布局与深浅主题令牌完成，等待评审', commit: '7d02b11' },
       { id: 'r7', taskId: 'T3', from: 'codex', at: '08:12', status: 'running', summary: '订单状态机（待支付→已支付→已发货→完成/取消）已实现，正在补退款分支', commit: 'e93f0a4' },
       { id: 'r6', taskId: 'T2', from: 'claude-code', at: '07:55', status: 'merged', summary: '评审通过，已合并到 ac/integration；集成分支测试全部通过', commit: '5bb7c30' },
@@ -124,3 +126,28 @@ function buildUsage(): UsageRecord[] {
 }
 
 export const mockUsage: UsageRecord[] = buildUsage()
+
+export const mockRunning: RunningTask[] = [
+  { tool: 'codex', projectId: 'shop-admin', taskId: 'T3', role: 'developer', startedAt: '08:51' },
+  { tool: 'claude-code', projectId: 'shop-admin', taskId: 'T4', role: 'reviewer', startedAt: '08:47' },
+]
+
+export const mockIdentity: GitIdentity = {
+  gitName: 'Lucky', gitEmail: 'lucky@example.com', gitVersion: '2.47.1',
+  ghInstalled: true, ghLoggedIn: true, ghLogin: 'luckySpro', ghHost: 'github.com',
+}
+
+export const mockRepos: GitRepo[] = [
+  { nameWithOwner: 'luckySpro/AutoCoder', description: '单机多 AI 开发工具协同', isPrivate: false, updatedAt: '2026-10-15T00:40:00Z', url: 'https://github.com/luckySpro/AutoCoder', defaultBranch: 'main' },
+  { nameWithOwner: 'luckySpro/shop-admin', description: '商城管理后台', isPrivate: true, updatedAt: '2026-10-14T09:12:00Z', url: 'https://github.com/luckySpro/shop-admin', defaultBranch: 'main' },
+  { nameWithOwner: 'luckySpro/freemind', description: '离线思维导图', isPrivate: true, updatedAt: '2026-10-11T16:30:00Z', url: 'https://github.com/luckySpro/freemind', defaultBranch: 'main' },
+  { nameWithOwner: 'luckySpro/macntfs', description: 'macOS NTFS 读写工具', isPrivate: true, updatedAt: '2026-10-02T03:20:00Z', url: 'https://github.com/luckySpro/macntfs', defaultBranch: 'master' },
+  { nameWithOwner: 'luckySpro/company-landing', description: '企业官网', isPrivate: false, updatedAt: '2026-09-28T11:05:00Z', url: 'https://github.com/luckySpro/company-landing', defaultBranch: 'main' },
+  { nameWithOwner: 'luckySpro/dotfiles', description: '', isPrivate: false, updatedAt: '2026-08-19T07:44:00Z', url: 'https://github.com/luckySpro/dotfiles', defaultBranch: 'main' },
+]
+
+export const mockLocal: LocalRepo[] = [
+  { name: 'shop-admin', path: '~/code/shop-admin', remote: 'git@github.com:luckySpro/shop-admin.git', branch: 'main' },
+  { name: 'company-landing', path: '~/code/company-landing', remote: 'git@github.com:luckySpro/company-landing.git', branch: 'main' },
+  { name: 'experiments', path: '~/code/experiments', branch: 'dev' },
+]

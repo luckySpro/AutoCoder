@@ -1,118 +1,184 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { scanTools, store } from '../api'
+import { computed, ref } from 'vue'
+import { importTools, removeTool, saveTool, scanTools, specOf, store, strengthName } from '../api'
+import AgentMark from '../components/AgentMark.vue'
+import Icon from '../components/Icon.vue'
+import ToolEditor from '../components/ToolEditor.vue'
+import type { ToolDetection } from '../types'
 
-const installed = computed(() => store.tools.filter((t) => t.installed))
-const missing = computed(() => store.tools.filter((t) => !t.installed))
-const scannedAt = computed(() => (store.scannedAt ? new Date(store.scannedAt).toLocaleString() : '—'))
+const editing = ref<ToolDetection | null>(null)
+const creating = ref(false)
+const importing = ref(false)
+const importText = ref('')
+const importError = ref('')
+const confirmId = ref('')
+const toast = ref('')
 
-const strengthName: Record<string, string> = {
-  architecture: '架构', coding: '编码', frontend: '前端', testing: '测试', review: '评审',
+const groups = computed(() => [
+  { key: 'ready', title: '可派发', hint: '已安装并参与协同', tools: store.tools.filter((t) => t.installed && !t.disabled) },
+  { key: 'missing', title: '未安装', hint: '安装后点"重新检测"', tools: store.tools.filter((t) => !t.installed && !t.disabled) },
+  { key: 'off', title: '已停用', hint: '保留在清单中，不参与分配', tools: store.tools.filter((t) => t.disabled) },
+])
+const scannedAt = computed(() => (store.scannedAt ? new Date(store.scannedAt).toLocaleTimeString() : '—'))
+
+function flash(msg: string) {
+  toast.value = msg
+  setTimeout(() => (toast.value = ''), 2400)
 }
+
+async function toggle(t: ToolDetection) {
+  await saveTool({ ...specOf(t), disabled: !t.disabled })
+  flash(t.disabled ? `已启用 ${t.name}` : `已停用 ${t.name}`)
+}
+
+async function remove(t: ToolDetection) {
+  if (confirmId.value !== t.id) {
+    confirmId.value = t.id
+    return
+  }
+  confirmId.value = ''
+  await removeTool(t.id)
+  flash(t.source === 'custom' ? `已删除 ${t.name}` : `${t.name} 已恢复默认`)
+}
+
+async function doImport() {
+  importError.value = ''
+  try {
+    await importTools(importText.value)
+    importing.value = false
+    importText.value = ''
+    flash('已导入清单')
+  } catch (e) {
+    importError.value = (e as Error).message
+  }
+}
+
+async function readFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (file) importText.value = await file.text()
+}
+
+const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定义' }
 </script>
 
 <template>
-  <section>
-    <div class="page-head">
+  <section class="page">
+    <header class="page-head">
       <div>
-        <h1>启动检查</h1>
-        <p>每次启动时按工具清单检测本机已安装的命令行开发工具，检测结果用于默认的角色分配。</p>
+        <div class="eyebrow">启动检查 · {{ scannedAt }}</div>
+        <h1>工具清单</h1>
+        <p class="lede">AutoCoder 启动时按这份清单检测本机的 CLI 开发工具。在这里增删、停用或调整参数，保存后立即重新检测，不需要改配置文件。</p>
       </div>
-      <button class="btn primary" :disabled="store.loading" @click="scanTools(true)">
-        {{ store.loading ? '检测中…' : '重新检测' }}
-      </button>
-    </div>
+      <div class="actions">
+        <button class="btn" :disabled="store.loading" @click="scanTools(true)"><Icon name="refresh" />{{ store.loading ? '检测中…' : '重新检测' }}</button>
+        <button class="btn" @click="importing = true"><Icon name="upload" />导入</button>
+        <a class="btn" :class="{ disabled: store.demo }" :href="store.demo ? undefined : '/api/tools/export'" :aria-disabled="store.demo" download><Icon name="download" />导出</a>
+        <button class="btn primary" @click="creating = true"><Icon name="plus" />添加工具</button>
+      </div>
+    </header>
 
-    <div class="card meta row">
-      <span>清单：<code>{{ store.manifestPath || '内置清单' }}</code></span>
-      <span class="faint">·</span>
-      <span>检测时间：{{ scannedAt }}</span>
-      <span class="faint">·</span>
-      <span>已安装 <strong>{{ installed.length }}</strong> / {{ store.tools.length }}</span>
-    </div>
-
-    <h2 class="sec">已安装</h2>
-    <p v-if="!store.loading && installed.length === 0" class="card muted">
-      没有检测到清单中的任何工具。请安装 Claude Code、Codex 等工具后点击"重新检测"，或在清单中添加自定义工具。
-    </p>
-    <div class="grid">
-      <article v-for="t in installed" :key="t.id" class="card tool">
-        <header class="row">
-          <strong>{{ t.name }}</strong>
-          <span class="badge success">✓ 已安装</span>
-        </header>
-        <dl>
-          <dt>版本</dt><dd>{{ t.version || '未知' }}</dd>
-          <dt>路径</dt><dd class="mono path" :title="t.path">{{ t.path }}</dd>
-          <dt>调度</dt>
-          <dd>
-            <span v-if="t.headless?.length">可派发</span>
-            <span v-else class="badge warning">缺少调用模板，不参与分配</span>
-          </dd>
-          <dt>计量</dt>
-          <dd>
-            <span v-if="t.usageArgs?.length" class="badge success">精确 token 用量</span>
-            <span v-else class="badge warning" title="该工具不输出用量，按输入输出字符数估算">估算</span>
-          </dd>
-          <dt>能力</dt>
-          <dd>
-            <div class="meter" role="meter" :aria-valuenow="t.capability" aria-valuemin="0" aria-valuemax="100" :aria-label="`${t.name} 能力评分`">
-              <span :style="{ width: t.capability + '%' }"></span>
+    <div v-for="g in groups" :key="g.key" class="group" v-show="g.tools.length || g.key === 'ready'">
+      <div class="group-head"><h2>{{ g.title }} <span class="faint num">{{ g.tools.length }}</span></h2><span class="faint small">{{ g.hint }}</span></div>
+      <p v-if="!g.tools.length" class="panel muted">还没有可派发的工具。安装 Claude Code、Codex 等 CLI 后点"重新检测"，或点"添加工具"登记其他工具。</p>
+      <div class="rows">
+        <article v-for="t in g.tools" :key="t.id" class="tool" :class="{ off: t.disabled }">
+          <AgentMark :id="t.id" :size="36" />
+          <div class="info">
+            <div class="row">
+              <h3>{{ t.name }}</h3>
+              <span class="faint small">{{ t.vendor }}</span>
+              <span class="pill plain outline small">{{ sourceLabel[t.source] }}</span>
             </div>
-            <span class="faint">{{ t.capability }}</span>
-          </dd>
-          <dt>擅长</dt>
-          <dd class="row"><span v-for="s in t.strengths" :key="s" class="badge">{{ strengthName[s] ?? s }}</span></dd>
-        </dl>
-        <p v-if="t.error" class="err">{{ t.error }}</p>
-      </article>
+            <div class="row small">
+              <code class="cmd">{{ t.commands[0] }} {{ (t.headless ?? []).join(' ') }}</code>
+            </div>
+            <div class="row small chips">
+              <span v-for="s in t.strengths" :key="s" class="pill plain">{{ strengthName[s] ?? s }}</span>
+              <span v-if="t.usageArgs?.length" class="pill ok">精确用量</span>
+              <span v-else class="pill warn" title="不输出 token 用量，按字符数估算">估算用量</span>
+              <span v-if="!t.headless?.length" class="pill bad">缺少调用参数</span>
+            </div>
+          </div>
+          <div class="state">
+            <template v-if="t.installed">
+              <span class="ver mono">v{{ t.version || '?' }}</span>
+              <span class="path mono faint" :title="t.path">{{ t.path }}</span>
+            </template>
+            <span v-else class="faint small">PATH 中未找到 <code>{{ t.commands.join(' / ') }}</code></span>
+            <div class="cap" :title="`能力评分 ${t.capability}`"><span :style="{ width: t.capability + '%' }"></span></div>
+          </div>
+          <div class="ops">
+            <label class="switch" :title="t.disabled ? '启用' : '停用'">
+              <input type="checkbox" :checked="!t.disabled" :aria-label="`${t.name} 参与协同`" @change="toggle(t)" />
+              <span></span>
+            </label>
+            <button class="btn ghost sm" :aria-label="`编辑 ${t.name}`" @click="editing = t"><Icon name="edit" /></button>
+            <button v-if="t.source !== 'builtin'" class="btn ghost sm" :class="{ danger: confirmId === t.id }" @click="remove(t)" @blur="confirmId = ''">
+              <Icon :name="t.source === 'custom' ? 'trash' : 'undo'" />
+              <span v-if="confirmId === t.id">{{ t.source === 'custom' ? '确认删除' : '确认恢复' }}</span>
+              <span v-else class="sr-only">{{ t.source === 'custom' ? '删除' : '恢复默认' }}</span>
+            </button>
+          </div>
+        </article>
+      </div>
     </div>
 
-    <h2 class="sec">未检测到</h2>
-    <div class="card table-wrap">
-      <table>
-        <thead><tr><th>工具</th><th>厂商</th><th>查找命令</th></tr></thead>
-        <tbody>
-          <tr v-if="!missing.length"><td colspan="3" class="muted">清单中的工具都已安装</td></tr>
-          <tr v-for="t in missing" :key="t.id">
-            <td>{{ t.name }}</td>
-            <td class="muted">{{ t.vendor }}</td>
-            <td><code>{{ t.commands.join(' / ') }}</code></td>
-          </tr>
-        </tbody>
-      </table>
+    <p class="faint small wrap">清单保存在 <code>{{ store.manifestPath }}</code>，只记录你改动过或新增的条目；内置条目随版本更新。</p>
+
+    <ToolEditor v-if="creating || editing" :tool="editing ?? undefined" @close="creating = false; editing = null" />
+
+    <div v-if="importing" class="scrim" @click.self="importing = false">
+      <form class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="im-title" @submit.prevent="doImport">
+        <header class="sheet-head"><h2 id="im-title">导入工具清单</h2><button type="button" class="btn ghost sm" aria-label="关闭" @click="importing = false"><Icon name="close" /></button></header>
+        <div class="sheet-body im">
+          <p class="muted small">导入会替换你的自定义清单（内置条目不受影响）。可以选择从另一台机器导出的 YAML 文件，或直接粘贴内容。</p>
+          <input id="im-file" type="file" accept=".yaml,.yml,text/yaml" @change="readFile" />
+          <textarea id="im-text" v-model="importText" class="mono" rows="10" placeholder="tools:&#10;  - id: my-agent&#10;    name: My Agent&#10;    commands: [my-agent]&#10;    headless: [run, &quot;{prompt}&quot;]"></textarea>
+        </div>
+        <footer class="sheet-foot">
+          <span class="small err">{{ importError }}</span>
+          <span class="actions"><button type="button" class="btn" @click="importing = false">取消</button><button class="btn primary" :disabled="!importText.trim()">导入</button></span>
+        </footer>
+      </form>
     </div>
 
-    <details class="card howto">
-      <summary>如何添加常用工具到清单</summary>
-      <p class="muted">在 <code>~/.autocoder/tools.yaml</code> 中按 id 覆盖或追加条目，下次启动自动生效：</p>
-      <pre><code>tools:
-  - id: my-agent
-    name: My Agent
-    commands: [my-agent]
-    version_args: ["--version"]
-    headless: ["run", "{prompt}"]          # 非交互调用模板
-    usage_args: ["--format", "json"]      # 可选：输出 token 用量的参数
-    capability: 80
-    strengths: [coding, testing]
-  - id: aider
-    disabled: true   # 不想参与协同的工具</code></pre>
-    </details>
+    <div v-if="toast" class="toast" role="status">{{ toast }}</div>
   </section>
 </template>
 
 <style scoped>
-.meta { gap: 10px; font-size: 13px; margin-bottom: 8px; }
-.sec { margin: 24px 0 10px; }
-.tool header { margin-bottom: 10px; }
-dl { display: grid; grid-template-columns: 44px 1fr; gap: 6px 10px; margin: 0; font-size: 13px; }
-dt { color: var(--text-3); }
-dd { margin: 0; min-width: 0; display: flex; align-items: center; gap: 8px; }
-.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-.meter { flex: 1; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
-.meter span { display: block; height: 100%; background: var(--primary); }
-.err { color: var(--danger); font-size: 12.5px; margin: 8px 0 0; }
-.howto { margin-top: 24px; }
-.howto summary { cursor: pointer; font-weight: 500; }
-pre { background: var(--surface-2); padding: 12px; border-radius: var(--radius-sm); overflow-x: auto; }
+.group { display: grid; gap: 10px; }
+.group-head { display: flex; align-items: baseline; gap: 12px; }
+.rows { display: grid; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
+.rows:empty { display: none; }
+.tool {
+  display: grid; grid-template-columns: auto minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 18px; align-items: center;
+  padding: 16px 18px; border-top: 1px solid var(--line);
+}
+.tool:first-child { border-top: 0; }
+.tool.off { opacity: 0.6; }
+.info { display: grid; gap: 6px; min-width: 0; }
+.cmd { background: var(--sunken); padding: 2px 8px; border-radius: var(--r-sm); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.chips { gap: 6px; }
+.state { display: grid; gap: 4px; min-width: 0; font-size: 12.5px; }
+.ver { font-weight: 600; }
+.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
+.cap { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 4px; max-width: 160px; }
+.cap span { display: block; height: 100%; background: var(--ink-2); }
+.ops { display: flex; align-items: center; gap: 4px; }
+.ops .switch { margin-right: 6px; }
+a.btn { text-decoration: none; }
+a.btn.disabled { opacity: 0.5; pointer-events: none; }
+.narrow { width: min(560px, 100%); }
+.im { display: grid; gap: 12px; }
+.err { color: var(--bad); }
+.wrap { overflow-wrap: anywhere; }
+.toast {
+  position: fixed; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 30;
+  background: var(--ink); color: var(--canvas); padding: 10px 16px; border-radius: var(--r); font-size: 13px; box-shadow: var(--shadow);
+}
+@media (max-width: 900px) {
+  .tool { grid-template-columns: auto minmax(0, 1fr); }
+  .state, .ops { grid-column: 2; }
+}
 </style>

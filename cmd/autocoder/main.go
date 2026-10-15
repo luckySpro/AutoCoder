@@ -15,6 +15,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/luckySpro/AutoCoder/internal/gitinfo"
 	"github.com/luckySpro/AutoCoder/internal/roles"
 	"github.com/luckySpro/AutoCoder/internal/server"
 	"github.com/luckySpro/AutoCoder/internal/toolscan"
@@ -33,7 +34,7 @@ func main() {
 	case "tools":
 		printTools(*manifest)
 	case "", "serve":
-		srv := &server.Server{ManifestPath: *manifest, Scanner: toolscan.NewScanner(), Version: version}
+		srv := &server.Server{ManifestPath: *manifest, Scanner: toolscan.NewScanner(), Git: gitinfo.New(), Version: version}
 		// 启动即检测一次，结果缓存给界面使用。
 		tools, _, err := srv.Scan(context.Background(), true)
 		if err != nil {

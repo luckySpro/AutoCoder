@@ -1,44 +1,81 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { scanTools, store } from './api'
+import { agent } from './agents'
+import { scanTools, store, toolName } from './api'
+import AgentMark from './components/AgentMark.vue'
+import Icon from './components/Icon.vue'
 
 onMounted(() => scanTools())
 
-const installed = computed(() => store.tools.filter((t) => t.installed).length)
+const crew = computed(() => store.tools.filter((t) => t.installed && !t.disabled && t.headless?.length))
+const roleOf = (id: string) => store.assignments.find((a) => a.toolId === id)?.roles ?? []
+const roleShort: Record<string, string> = { lead: '主管', developer: '开发', frontend: '前端', tester: '测试', reviewer: '评审' }
+const busy = (id: string) => store.running.find((r) => r.tool === id)
+const slots = computed(() =>
+  Array.from({ length: store.settings.concurrency }, (_, i) => store.running[i] ?? null),
+)
 
 const nav = [
-  { to: '/projects', label: '项目', icon: '▦' },
-  { to: '/usage', label: 'Token 用量', icon: '∑' },
-  { to: '/roles', label: '角色分配', icon: '◎' },
-  { to: '/tools', label: '启动检查', icon: '✓' },
+  { to: '/projects', label: '项目', icon: 'projects' },
+  { to: '/usage', label: 'Token 用量', icon: 'usage' },
+  { to: '/roles', label: '角色与运行', icon: 'roles' },
+  { to: '/tools', label: '工具清单', icon: 'tools' },
 ]
 </script>
 
 <template>
   <div class="shell">
-    <aside class="side">
-      <div class="brand">
-        <span class="logo" aria-hidden="true">AC</span>
-        <div>
-          <strong>AutoCoder</strong>
-          <div class="faint small">多开发工具协同</div>
-        </div>
-      </div>
+    <aside class="rail">
+      <RouterLink to="/projects" class="brand" aria-label="AutoCoder 首页">
+        <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="var(--accent)" />
+          <path d="M9 8v16M9 12c0 4 4 4 7 4h7M9 20c0-3 3-4 6-4" stroke="var(--accent-ink)" stroke-width="2.2" fill="none" stroke-linecap="round" />
+          <circle cx="23" cy="16" r="2.6" fill="var(--accent-ink)" />
+        </svg>
+        <span>
+          <b>AutoCoder</b>
+          <small>多工具协同台</small>
+        </span>
+      </RouterLink>
+
       <nav aria-label="主导航">
         <RouterLink v-for="n in nav" :key="n.to" :to="n.to" class="nav-item">
-          <span aria-hidden="true" class="icon">{{ n.icon }}</span>{{ n.label }}
+          <Icon :name="n.icon" />{{ n.label }}
         </RouterLink>
       </nav>
-      <RouterLink to="/tools" class="tool-summary">
-        <span class="dot" :class="{ on: installed > 0 }" aria-hidden="true"></span>
-        <span v-if="store.loading">正在检测工具…</span>
-        <span v-else>已检测到 {{ installed }} 个工具</span>
-        <span v-if="store.demo" class="badge warning">演示</span>
-      </RouterLink>
+
+      <section class="crew" aria-label="工具编组">
+        <div class="rail-label">工具编组</div>
+        <p v-if="store.loading && !crew.length" class="rail-empty">正在检测本机工具…</p>
+        <p v-else-if="!crew.length" class="rail-empty">还没有可派发的工具。<RouterLink to="/tools">去添加</RouterLink></p>
+        <ul>
+          <li v-for="t in crew" :key="t.id">
+            <AgentMark :id="t.id" :size="24" />
+            <span class="who">
+              <span class="nm">{{ t.name }}</span>
+              <span class="rl">{{ roleOf(t.id).map((r) => roleShort[r]).join(' · ') || '未分配' }}</span>
+            </span>
+            <span class="state" :class="{ on: busy(t.id) }" :title="busy(t.id) ? `正在处理 ${busy(t.id)!.taskId}` : '空闲'"></span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="slots" aria-label="运行槽">
+        <div class="rail-label row between">
+          <span>运行槽</span><span class="num">{{ store.running.length }}/{{ store.settings.concurrency }}</span>
+        </div>
+        <div class="slot-row">
+          <span v-for="(s, i) in slots" :key="i" class="slot" :class="{ used: s }"
+            :style="s ? { '--c': agent(s.tool).color } : {}" :title="s ? `${toolName(s.tool)} · ${s.taskId}` : '空闲'">
+            <template v-if="s">{{ s.taskId }}</template>
+          </span>
+        </div>
+      </section>
     </aside>
-    <main class="main">
+
+    <main class="work">
       <div v-if="store.demo" class="notice" role="status">
-        当前是演示数据：没有连接到本机的 AutoCoder 服务。在本机运行 <code>autocoder</code> 后打开 127.0.0.1:7788 即可看到真实检测结果。
+        当前是演示数据，没有连接到本机的 AutoCoder 服务。在本机运行 <code>autocoder</code> 后打开 <code>127.0.0.1:7788</code> 即可管理真实的工具与仓库。
       </div>
       <RouterView />
     </main>
@@ -46,41 +83,47 @@ const nav = [
 </template>
 
 <style scoped>
-.shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
-.side {
-  background: var(--surface); border-right: 1px solid var(--border);
-  padding: 16px 12px; display: flex; flex-direction: column; gap: 20px;
-  position: sticky; top: 0; height: 100vh;
+.shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; }
+.rail {
+  background: var(--rail); color: var(--rail-ink); padding: 18px 14px;
+  display: flex; flex-direction: column; gap: 22px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
-.logo {
-  width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
-  background: var(--primary); color: #fff; font-weight: 700; font-size: 13px;
-}
-.small { font-size: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; color: inherit; padding: 0 6px; text-decoration: none; }
+.brand span { display: grid; line-height: 1.2; }
+.brand b { font: 650 16px var(--font-display); letter-spacing: -0.01em; }
+.brand small { color: var(--rail-ink-2); font-size: 11.5px; }
 nav { display: grid; gap: 2px; }
 .nav-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm);
-  color: var(--text-2);
+  display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 9px;
+  color: var(--rail-ink-2); font-weight: 500; text-decoration: none;
 }
-.nav-item:hover { background: var(--surface-2); color: var(--text); }
-.nav-item.router-link-active { background: var(--primary-soft); color: var(--primary); font-weight: 500; }
-.icon { width: 16px; text-align: center; }
-.tool-summary {
-  margin-top: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  font-size: 12.5px; color: var(--text-2); padding: 8px 10px; border-radius: var(--radius-sm);
-  background: var(--surface-2);
+.nav-item:hover { background: var(--rail-2); color: var(--rail-ink); text-decoration: none; }
+.nav-item.router-link-active { background: var(--rail-2); color: var(--rail-ink); box-shadow: inset 2px 0 0 var(--accent); }
+.rail-label { font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--rail-ink-2); margin: 0 6px 10px; }
+.rail-empty { color: var(--rail-ink-2); font-size: 12.5px; margin: 0 6px; }
+.crew ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.crew li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 9px; background: var(--rail-2); }
+.crew :deep(.mark) { background: color-mix(in srgb, var(--c) 22%, var(--rail)); }
+.who { display: grid; min-width: 0; flex: 1; line-height: 1.3; }
+.nm { font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl { font-size: 11.5px; color: var(--rail-ink-2); }
+.state { width: 8px; height: 8px; border-radius: 50%; background: var(--rail-line); flex: none; }
+.state.on { background: #4fd18b; box-shadow: 0 0 0 3px rgba(79, 209, 139, 0.18); }
+.slots { margin-top: auto; }
+.slot-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 0 6px; }
+.slot {
+  height: 30px; border-radius: 7px; border: 1px dashed var(--rail-line); display: grid; place-items: center;
+  font: 600 11px var(--font-mono); color: var(--rail-ink);
 }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
-.dot.on { background: var(--success); }
-.main { padding: 24px; min-width: 0; max-width: 1400px; }
+.slot.used { border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 22%, var(--rail)); }
+.work { padding: 28px 32px 48px; min-width: 0; display: grid; gap: 20px; align-content: start; max-width: 1440px; }
 
-@media (max-width: 760px) {
+@media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; }
-  .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; }
-  nav { display: flex; gap: 4px; overflow-x: auto; }
-  .tool-summary { margin-top: 0; }
-  .brand .faint { display: none; }
-  .main { padding: 16px; }
+  .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; }
+  nav { display: flex; overflow-x: auto; flex: 1 1 100%; order: 3; }
+  .nav-item { flex: none; }
+  .crew, .slots { display: none; }
+  .work { padding: 18px 16px 40px; }
 }
 </style>
