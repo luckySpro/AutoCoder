@@ -208,7 +208,7 @@ function exportCSV() {
 .bars li { display: flex; gap: 10px; align-items: center; }
 .grow { flex: 1; min-width: 0; display: grid; gap: 4px; }
 .bar { height: 8px; border-radius: 4px; background: var(--sunken); overflow: hidden; }
-.bar span { display: block; height: 100%; background: var(--accent); }
+.bar span { display: block; height: 100%; background: var(--ink); }
 .nowrap { white-space: nowrap; }
 select { width: auto; min-width: 128px; height: 34px; padding: 0 10px; }
 @media (max-width: 1000px) {

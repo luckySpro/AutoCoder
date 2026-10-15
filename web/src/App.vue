@@ -2,8 +2,6 @@
 import { computed, onMounted } from 'vue'
 import { agent } from './agents'
 import { scanTools, store, toolName } from './api'
-import AgentMark from './components/AgentMark.vue'
-import Icon from './components/Icon.vue'
 import { startLive } from './live'
 
 onMounted(() => {
@@ -20,65 +18,59 @@ const slots = computed(() =>
 )
 
 const nav = [
-  { to: '/projects', label: '项目', icon: 'projects' },
-  { to: '/live', label: '运行监控', icon: 'terminal' },
-  { to: '/usage', label: 'Token 用量', icon: 'usage' },
-  { to: '/roles', label: '角色与运行', icon: 'roles' },
-  { to: '/tools', label: '工具清单', icon: 'tools' },
+  { to: '/projects', label: '项目' },
+  { to: '/live', label: '运行监控' },
+  { to: '/usage', label: 'Token 用量' },
+  { to: '/roles', label: '角色与运行' },
+  { to: '/tools', label: '工具清单' },
 ]
 </script>
 
 <template>
   <div class="shell">
-    <aside class="rail">
-      <RouterLink to="/projects" class="brand" aria-label="AutoCoder 首页">
-        <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
-          <rect width="32" height="32" rx="8" fill="var(--accent)" />
-          <path d="M9 8v16M9 12c0 4 4 4 7 4h7M9 20c0-3 3-4 6-4" stroke="var(--accent-ink)" stroke-width="2.2" fill="none" stroke-linecap="round" />
-          <circle cx="23" cy="16" r="2.6" fill="var(--accent-ink)" />
-        </svg>
-        <span>
-          <b>AutoCoder</b>
-          <small>多工具协同台</small>
-        </span>
-      </RouterLink>
-
-      <nav aria-label="主导航">
-        <RouterLink v-for="n in nav" :key="n.to" :to="n.to" class="nav-item">
-          <Icon :name="n.icon" />{{ n.label }}
-          <span v-if="n.to === '/live' && store.running.length" class="count num">{{ store.running.length }}</span>
+    <header class="top">
+      <div class="bar">
+        <RouterLink to="/projects" class="brand" aria-label="AutoCoder 首页">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M4 3v18M4 8h7a4 4 0 0 1 4 4v9M4 14h4" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="square" />
+            <rect x="17" y="3" width="4" height="4" fill="var(--accent)" />
+          </svg>
+          <b>AUTOCODER</b>
+          <span>调度台</span>
         </RouterLink>
-      </nav>
+        <nav aria-label="主导航">
+          <RouterLink v-for="(n, i) in nav" :key="n.to" :to="n.to" class="nav-item">
+            <span class="ix">{{ String(i + 1).padStart(2, '0') }}</span>{{ n.label }}
+            <span v-if="n.to === '/live' && store.running.length" class="count num">{{ store.running.length }}</span>
+          </RouterLink>
+        </nav>
+      </div>
 
-      <section class="crew" aria-label="工具编组">
-        <div class="rail-label">工具编组</div>
-        <p v-if="store.loading && !crew.length" class="rail-empty">正在检测本机工具…</p>
-        <p v-else-if="!crew.length" class="rail-empty">还没有可派发的工具。<RouterLink to="/tools">去添加</RouterLink></p>
-        <ul>
-          <li v-for="t in crew" :key="t.id">
-            <AgentMark :id="t.id" :size="24" />
-            <span class="who">
+      <div class="board">
+        <section class="crew" aria-label="工具编组">
+          <span class="label">编组</span>
+          <p v-if="store.loading && !crew.length" class="empty">正在检测本机工具…</p>
+          <p v-else-if="!crew.length" class="empty">还没有可派发的工具，<RouterLink to="/tools">去添加</RouterLink></p>
+          <ul>
+            <li v-for="t in crew" :key="t.id" :class="{ on: busy(t.id) }" :style="{ '--c': agent(t.id).color }"
+              :title="busy(t.id) ? `正在处理 ${busy(t.id)!.taskId}` : '空闲'">
+              <i class="lamp"></i>
               <span class="nm">{{ t.name }}</span>
-              <span class="rl">{{ roleOf(t.id).map((r) => roleShort[r]).join(' · ') || '未分配' }}</span>
-            </span>
-            <span class="state" :class="{ on: busy(t.id) }" :title="busy(t.id) ? `正在处理 ${busy(t.id)!.taskId}` : '空闲'"></span>
-          </li>
-        </ul>
-      </section>
-
-      <section class="slots" aria-label="运行槽">
-        <div class="rail-label row between">
-          <span>运行槽</span><span class="num">{{ store.running.length }}/{{ store.settings.concurrency }}</span>
-        </div>
-        <div class="slot-row">
+              <span class="rl">{{ roleOf(t.id).map((r) => roleShort[r]).join('·') || '未分配' }}</span>
+              <span v-if="busy(t.id)" class="job mono">{{ busy(t.id)!.taskId }}</span>
+            </li>
+          </ul>
+        </section>
+        <section class="slots" aria-label="运行槽">
+          <span class="label">运行槽 <b class="num">{{ store.running.length }}/{{ store.settings.concurrency }}</b></span>
           <template v-for="(s, i) in slots" :key="i">
             <RouterLink v-if="s" :to="`/live?run=${s.projectId}/${s.taskId}`" class="slot used" :style="{ '--c': agent(s.tool).color }"
               :title="`${toolName(s.tool)} · ${s.taskId}，点击查看实时输出`">{{ s.taskId }}</RouterLink>
             <span v-else class="slot" title="空闲"></span>
           </template>
-        </div>
-      </section>
-    </aside>
+        </section>
+      </div>
+    </header>
 
     <main class="work">
       <div v-if="store.demo" class="notice" role="status">
@@ -90,49 +82,66 @@ const nav = [
 </template>
 
 <style scoped>
-.shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; }
-.rail {
-  background: var(--rail); color: var(--rail-ink); padding: 18px 14px;
-  display: flex; flex-direction: column; gap: 22px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+.shell { min-height: 100vh; }
+.top { position: sticky; top: 0; z-index: 10; }
+.bar {
+  display: flex; align-items: stretch; gap: 28px; background: var(--rail); color: var(--rail-ink);
+  padding-inline: max(24px, env(safe-area-inset-left, 0px)) max(24px, env(safe-area-inset-right, 0px));
 }
-.brand { display: flex; align-items: center; gap: 10px; color: inherit; padding: 0 6px; text-decoration: none; }
-.brand span { display: grid; line-height: 1.2; }
-.brand b { font: 650 16px var(--font-display); letter-spacing: -0.01em; }
-.brand small { color: var(--rail-ink-2); font-size: 11.5px; }
-nav { display: grid; gap: 2px; }
+.brand { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; padding: 12px 0; }
+.brand b { font: 800 14px/1 var(--font-mono); letter-spacing: 0.18em; }
+.brand span { font-size: 12px; color: var(--rail-ink-2); padding-left: 10px; border-left: 1px solid var(--rail-line); }
+.brand:hover { text-decoration: none; }
+nav { display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: none; }
 .nav-item {
-  display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 9px;
-  color: var(--rail-ink-2); font-weight: 500; text-decoration: none;
+  display: flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--rail-ink-2); text-decoration: none;
+  font-size: 13.5px; font-weight: 600; white-space: nowrap; border-bottom: 3px solid transparent; border-top: 3px solid transparent;
 }
-.nav-item:hover { background: var(--rail-2); color: var(--rail-ink); text-decoration: none; }
-.nav-item.router-link-active { background: var(--rail-2); color: var(--rail-ink); box-shadow: inset 2px 0 0 var(--accent); }
-.rail-label { font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--rail-ink-2); margin: 0 6px 10px; }
-.rail-empty { color: var(--rail-ink-2); font-size: 12.5px; margin: 0 6px; }
-.crew ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.crew li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 9px; background: var(--rail-2); }
-.crew :deep(.mark) { background: color-mix(in srgb, var(--c) 22%, var(--rail)); }
-.who { display: grid; min-width: 0; flex: 1; line-height: 1.3; }
-.nm { font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rl { font-size: 11.5px; color: var(--rail-ink-2); }
-.state { width: 8px; height: 8px; border-radius: 50%; background: var(--rail-line); flex: none; }
-.state.on { background: #4fd18b; box-shadow: 0 0 0 3px rgba(79, 209, 139, 0.18); }
-.slots { margin-top: auto; }
-.slot-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 0 6px; }
-.slot {
-  height: 30px; border-radius: 7px; border: 1px dashed var(--rail-line); display: grid; place-items: center;
-  font: 600 11px var(--font-mono); color: var(--rail-ink);
-}
-.slot.used { border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 22%, var(--rail)); text-decoration: none; }
-.slot.used:hover { background: color-mix(in srgb, var(--c) 36%, var(--rail)); }
-.count { margin-left: auto; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px; display: grid; place-items: center; font-size: 11px; background: #4fd18b; color: #08130d; }
-.work { padding: 28px 32px 48px; min-width: 0; display: grid; gap: 20px; align-content: start; max-width: 1440px; }
+.nav-item .ix { font: 600 10.5px var(--font-mono); color: var(--rail-ink-2); opacity: 0.7; }
+.nav-item:hover { color: var(--rail-ink); text-decoration: none; }
+.nav-item.router-link-active { color: var(--rail-ink); border-bottom-color: var(--accent); }
+.nav-item.router-link-active .ix { color: var(--accent); opacity: 1; }
+.count { min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; font: 700 11px var(--font-mono); background: var(--accent); color: var(--accent-ink); }
 
+.board {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  background: var(--surface); border-bottom: 1px solid var(--ink); min-height: 44px;
+  padding: 6px max(24px, env(safe-area-inset-right, 0px)) 6px max(24px, env(safe-area-inset-left, 0px));
+}
+.label { font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+.label b { color: var(--ink); margin-left: 4px; }
+.crew { display: flex; align-items: center; gap: 14px; min-width: 0; flex-wrap: wrap; }
+.crew ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px 18px; flex-wrap: wrap; }
+.crew li { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.lamp { width: 9px; height: 9px; background: var(--c); opacity: 0.35; flex: none; }
+.crew li.on .lamp { opacity: 1; animation: lamp 1.6s steps(2) infinite; }
+.nm { font-weight: 650; }
+.rl { color: var(--ink-3); font-size: 12px; }
+.job { font-size: 11.5px; font-weight: 700; color: var(--c); }
+.empty { font-size: 12.5px; color: var(--ink-3); }
+.slots { display: flex; align-items: center; gap: 6px; }
+.slots .label { margin-right: 6px; }
+.slot {
+  width: 40px; height: 26px; display: grid; place-items: center; border: 1px dashed var(--line-strong);
+  font: 700 11px var(--font-mono); color: var(--ink); text-decoration: none;
+}
+.slot.used { border: 1px solid var(--c); background: var(--c); color: #fff; }
+.slot.used:hover { background: var(--ink); border-color: var(--ink); color: var(--canvas); text-decoration: none; }
+.work {
+  padding-block: 28px 56px; padding-inline: max(24px, env(safe-area-inset-left, 0px)) max(24px, env(safe-area-inset-right, 0px));
+  min-width: 0; display: grid; gap: 22px; align-content: start; max-width: 1480px; margin: 0 auto;
+}
+@keyframes lamp { 50% { opacity: 0.4; } }
 @media (max-width: 860px) {
-  .shell { grid-template-columns: 1fr; }
-  .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; }
-  nav { display: flex; overflow-x: auto; flex: 1 1 100%; order: 3; }
-  .nav-item { flex: none; }
-  .crew, .slots { display: none; }
-  .work { padding: 18px 16px 40px; }
+  .top { position: static; }
+  .crew .label, .slots .label { display: none; }
+  .board { gap: 8px; }
+  .bar { flex-direction: column; gap: 0; padding-inline: 16px; }
+  .brand { padding-bottom: 4px; }
+  .nav-item { padding: 0 10px; height: 40px; }
+  .nav-item:first-child { padding-left: 0; }
+  .board { padding-inline: 16px; }
+  .crew .rl { display: none; }
+  .work { padding-inline: 16px; padding-block: 18px 40px; }
 }
 </style>

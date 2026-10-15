@@ -59,7 +59,8 @@ function save() {
     </p>
 
     <template v-else>
-      <div v-if="lead" class="lead" :style="{ '--c': agent(lead.toolId).color }">
+      <div v-if="lead" class="lead-card" :style="{ '--c': agent(lead.toolId).color }">
+        <span class="tag mono">LEAD</span>
         <AgentMark :id="lead.toolId" :size="48" />
         <div>
           <div class="eyebrow">架构与项目管理</div>
@@ -86,11 +87,11 @@ function save() {
               <tr v-for="a in store.assignments" :key="a.toolId" :style="{ '--c': agent(a.toolId).color }">
                 <td><AgentMark :id="a.toolId" :size="26" label /></td>
                 <td v-for="r in store.roles" :key="r.id" class="cell">
-                  <label class="cellbox" :class="{ on: has(a.toolId, r.id), lead: r.id === 'lead' }">
-                    <input :type="r.id === 'lead' ? 'radio' : 'checkbox'" name="lead" :checked="has(a.toolId, r.id)" @change="toggle(a.toolId, r.id)" />
+                  <button type="button" class="cellbox" :class="{ on: has(a.toolId, r.id), 'lead-cell': r.id === 'lead' }"
+                    :role="r.id === 'lead' ? 'radio' : 'checkbox'" :aria-checked="has(a.toolId, r.id)"
+                    :aria-label="`${a.toolName} 担任 ${r.name}`" @click="toggle(a.toolId, r.id)">
                     <Icon v-if="has(a.toolId, r.id)" name="check" :size="14" />
-                    <span class="sr-only">{{ a.toolName }} 担任 {{ r.name }}</span>
-                  </label>
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -125,38 +126,45 @@ function save() {
 </template>
 
 <style scoped>
-.lead {
-  display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; padding: 20px 22px;
-  border-radius: var(--r-lg); border: 1px solid color-mix(in srgb, var(--c) 40%, var(--line));
-  background: linear-gradient(100deg, color-mix(in srgb, var(--c) 12%, var(--surface)), var(--surface) 60%);
+.lead-card {
+  position: relative; display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; padding: 22px 22px 20px;
+  border: 1px solid var(--ink); background: var(--surface); box-shadow: inset 6px 0 0 var(--c);
+  padding-left: 30px;
 }
-.lead h2 { font-size: 22px; margin: 4px 0; }
-.score { display: grid; justify-items: end; }
-.score .num { font: 600 34px/1 var(--font-display); color: var(--c); }
-.score small { color: var(--ink-3); font-size: 12px; }
+.lead-card .tag { position: absolute; top: -1px; right: -1px; padding: 3px 8px; background: var(--ink); color: var(--canvas); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; }
+.lead-card h2 { font-size: 24px; font-weight: 800; margin: 2px 0 6px; }
+.lead-card .eyebrow { margin-bottom: 0; }
+.score { display: grid; justify-items: end; padding-right: 10px; }
+.score .num { font: 700 44px/1 var(--font-mono); color: var(--ink); letter-spacing: -0.04em; }
+.score small { color: var(--ink-3); font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.08em; }
 .matrix th:not(:first-child), .cell { text-align: center; }
+.matrix td { padding-block: 12px; }
+.matrix td:first-child { padding-left: 14px; box-shadow: inset 3px 0 0 var(--c); }
 .cellbox {
-  position: relative; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px;
-  border: 1.5px dashed var(--line-strong); cursor: pointer; color: var(--surface); transition: background 0.12s, border-color 0.12s;
+  display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; vertical-align: middle;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: transparent; cursor: pointer; color: #fff;
+  transition: background 0.12s, border-color 0.12s;
 }
-.cellbox.lead { border-radius: 50%; }
-.cellbox input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
-.cellbox:hover { border-color: var(--c); }
-.cellbox.on { background: var(--c); border: 1.5px solid var(--c); }
-.cellbox:focus-within { box-shadow: var(--ring); }
+.cellbox:hover { border-color: var(--ink); background: var(--sunken); }
+.cellbox.on { background: var(--c); border-color: var(--c); }
+.cellbox.lead-cell { border-style: dashed; }
+.cellbox.lead-cell.on { border-style: solid; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--c); }
 .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .set { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.set h2 { font-size: 15px; }
 .set p { margin-top: 6px; max-width: 46ch; }
-.slotpick { display: flex; gap: 6px; flex: none; }
+.slotpick { display: flex; flex: none; border: 1px solid var(--ink); }
 .slotpick button {
-  width: 36px; height: 40px; border-radius: 8px; border: 1.5px dashed var(--line-strong); background: transparent;
-  color: var(--ink-3); font: 600 13px var(--font-mono); cursor: pointer;
+  width: 38px; height: 38px; border: 0; border-left: 1px solid var(--ink); background: transparent;
+  color: var(--ink-3); font: 700 13px var(--font-mono); cursor: pointer;
 }
-.slotpick button.on { border: 1.5px solid var(--accent); background: var(--accent-soft); color: var(--accent); }
+.slotpick button:first-child { border-left: 0; }
+.slotpick button.on { background: var(--ink); color: var(--canvas); }
+.slotpick button[aria-checked=true] { background: var(--accent); color: var(--accent-ink); }
 .switch.big { transform: scale(1.15); }
 @media (max-width: 900px) {
   .settings { grid-template-columns: 1fr; }
-  .lead { grid-template-columns: auto 1fr; }
+  .lead-card { grid-template-columns: auto 1fr; }
   .score { display: none; }
   .set { flex-wrap: wrap; }
 }

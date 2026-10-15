@@ -17,9 +17,8 @@ const a = computed(() => agent(props.id))
 <style scoped>
 .agent { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .mark {
-  flex: none; display: grid; place-items: center; border-radius: 7px;
-  background: color-mix(in srgb, var(--c) 18%, var(--surface)); color: var(--c);
-  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  flex: none; display: grid; place-items: center; border-radius: var(--r-sm);
+  background: var(--c); color: #fff;
   font: 700 10px/1 var(--font-mono); letter-spacing: -0.02em;
 }
 .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
