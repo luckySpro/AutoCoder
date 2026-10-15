@@ -1,6 +1,28 @@
 import { reactive } from 'vue'
-import { mockAssignments, mockProjects, mockRoles, mockTools } from './mock'
-import type { Assignment, Project, RoleId, RoleInfo, ToolDetection } from './types'
+import { mockAssignments, mockProjects, mockRoles, mockTools, mockUsage } from './mock'
+import type { Assignment, Project, RoleId, RoleInfo, Settings, ToolDetection, UsageRecord } from './types'
+
+const ASSIGN_KEY = 'autocoder.assignments'
+const SETTINGS_KEY = 'autocoder.settings'
+export const DEFAULT_SETTINGS: Settings = { concurrency: 3, autoMerge: true }
+export const MAX_CONCURRENCY = 5
+
+function loadJSON<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function saveJSON(key: string, v: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(v))
+  } catch {
+    /* 隐私模式下忽略 */
+  }
+}
 
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { Accept: 'application/json' } })
@@ -19,9 +41,9 @@ export const store = reactive({
   roles: [] as RoleInfo[],
   assignments: [] as Assignment[],
   projects: mockProjects as Project[],
+  usage: mockUsage as UsageRecord[],
+  settings: loadJSON<Settings>(SETTINGS_KEY) ?? { ...DEFAULT_SETTINGS },
 })
-
-const ASSIGN_KEY = 'autocoder.assignments'
 
 export async function scanTools(refresh = false) {
   store.loading = true
@@ -35,7 +57,7 @@ export async function scanTools(refresh = false) {
     store.scannedAt = t.scannedAt
     store.manifestPath = t.manifestPath
     store.roles = r.roles
-    store.assignments = loadSaved() ?? r.assignments ?? []
+    store.assignments = loadJSON<Assignment[]>(ASSIGN_KEY) ?? r.assignments ?? []
     store.demo = false
   } catch (e) {
     store.demo = true
@@ -44,35 +66,25 @@ export async function scanTools(refresh = false) {
     store.scannedAt = new Date().toISOString()
     store.manifestPath = '~/.autocoder/tools.yaml'
     store.roles = mockRoles
-    store.assignments = loadSaved() ?? structuredClone(mockAssignments)
+    store.assignments = loadJSON<Assignment[]>(ASSIGN_KEY) ?? structuredClone(mockAssignments)
   } finally {
     store.loading = false
   }
 }
 
-function loadSaved(): Assignment[] | null {
-  try {
-    const raw = localStorage.getItem(ASSIGN_KEY)
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    return null
-  }
-}
-
 export function saveAssignments() {
-  try {
-    localStorage.setItem(ASSIGN_KEY, JSON.stringify(store.assignments))
-  } catch {
-    /* 隐私模式下忽略 */
-  }
+  saveJSON(ASSIGN_KEY, store.assignments)
+  saveJSON(SETTINGS_KEY, store.settings)
 }
 
 export function resetAssignments() {
   try {
     localStorage.removeItem(ASSIGN_KEY)
+    localStorage.removeItem(SETTINGS_KEY)
   } catch {
     /* ignore */
   }
+  store.settings = { ...DEFAULT_SETTINGS }
   return scanTools()
 }
 
@@ -83,3 +95,9 @@ export function toolName(id: string) {
 export function roleName(id: RoleId) {
   return store.roles.find((r) => r.id === id)?.name ?? id
 }
+
+export const fmtTokens = (n: number) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n)
+
+export const totalTokens = (u: { input: number; output: number; cacheRead: number; cacheWrite: number }) =>
+  u.input + u.output + u.cacheRead + u.cacheWrite

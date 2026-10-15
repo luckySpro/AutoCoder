@@ -13,9 +13,9 @@ export interface ToolDetection {
   id: string
   name: string
   vendor: string
-  kind: 'cli' | 'ide'
   commands: string[]
   headless?: string[]
+  usageArgs?: string[] // 有值表示能输出精确的 token 用量
   capability: number
   strengths: string[]
   installed: boolean
@@ -28,7 +28,32 @@ export interface Assignment {
   toolId: string
   toolName: string
   roles: RoleId[]
-  manual: boolean
+}
+
+// 运行设置
+export interface Settings {
+  concurrency: number // 同时运行的工具进程数，默认 3，最多 5
+  autoMerge: boolean // 测试通过后由项目管理直接合并到主分支
+}
+
+export interface TokenUsage {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+}
+
+// 一次工具调用的计量记录：每次派发都会产生一条
+export interface UsageRecord {
+  id: string
+  projectId: string
+  taskId: string
+  tool: string
+  role: RoleId
+  at: string
+  durationSec: number
+  usage: TokenUsage
+  estimated: boolean // 工具不输出用量时按字符数估算
 }
 
 export type TaskStatus =

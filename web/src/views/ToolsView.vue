@@ -16,7 +16,7 @@ const strengthName: Record<string, string> = {
     <div class="page-head">
       <div>
         <h1>启动检查</h1>
-        <p>每次启动时按工具清单检测本机已安装的开发工具，检测结果用于默认的角色分配。</p>
+        <p>每次启动时按工具清单检测本机已安装的命令行开发工具，检测结果用于默认的角色分配。</p>
       </div>
       <button class="btn primary" :disabled="store.loading" @click="scanTools(true)">
         {{ store.loading ? '检测中…' : '重新检测' }}
@@ -39,7 +39,6 @@ const strengthName: Record<string, string> = {
       <article v-for="t in installed" :key="t.id" class="card tool">
         <header class="row">
           <strong>{{ t.name }}</strong>
-          <span class="badge" :class="t.kind === 'cli' ? 'info' : 'primary'">{{ t.kind === 'cli' ? 'CLI' : 'IDE' }}</span>
           <span class="badge success">✓ 已安装</span>
         </header>
         <dl>
@@ -47,8 +46,13 @@ const strengthName: Record<string, string> = {
           <dt>路径</dt><dd class="mono path" :title="t.path">{{ t.path }}</dd>
           <dt>调度</dt>
           <dd>
-            <span v-if="t.kind === 'cli' && t.headless?.length">可无人值守派发</span>
-            <span v-else class="badge warning">需在工具内手动执行</span>
+            <span v-if="t.headless?.length">可派发</span>
+            <span v-else class="badge warning">缺少调用模板，不参与分配</span>
+          </dd>
+          <dt>计量</dt>
+          <dd>
+            <span v-if="t.usageArgs?.length" class="badge success">精确 token 用量</span>
+            <span v-else class="badge warning" title="该工具不输出用量，按输入输出字符数估算">估算</span>
           </dd>
           <dt>能力</dt>
           <dd>
@@ -67,12 +71,12 @@ const strengthName: Record<string, string> = {
     <h2 class="sec">未检测到</h2>
     <div class="card table-wrap">
       <table>
-        <thead><tr><th>工具</th><th>厂商</th><th>类型</th><th>查找命令</th></tr></thead>
+        <thead><tr><th>工具</th><th>厂商</th><th>查找命令</th></tr></thead>
         <tbody>
+          <tr v-if="!missing.length"><td colspan="3" class="muted">清单中的工具都已安装</td></tr>
           <tr v-for="t in missing" :key="t.id">
             <td>{{ t.name }}</td>
             <td class="muted">{{ t.vendor }}</td>
-            <td>{{ t.kind.toUpperCase() }}</td>
             <td><code>{{ t.commands.join(' / ') }}</code></td>
           </tr>
         </tbody>
@@ -85,10 +89,10 @@ const strengthName: Record<string, string> = {
       <pre><code>tools:
   - id: my-agent
     name: My Agent
-    kind: cli
     commands: [my-agent]
     version_args: ["--version"]
-    headless: ["run", "{prompt}"]
+    headless: ["run", "{prompt}"]          # 非交互调用模板
+    usage_args: ["--format", "json"]      # 可选：输出 token 用量的参数
     capability: 80
     strengths: [coding, testing]
   - id: aider

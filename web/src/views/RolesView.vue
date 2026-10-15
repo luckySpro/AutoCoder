@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { resetAssignments, saveAssignments, store } from '../api'
+import { MAX_CONCURRENCY, resetAssignments, saveAssignments, store } from '../api'
 import type { RoleId } from '../types'
 
 const saved = ref(false)
@@ -41,7 +41,7 @@ function save() {
     <div class="page-head">
       <div>
         <h1>角色分配</h1>
-        <p>只有一个工具时它承担全部角色；多个工具时由能力最强的担任架构与项目管理，其余按擅长方向分配开发、前端、测试、评审。</p>
+        <p>只有一个工具时它承担全部角色；多个工具时由能力最强的担任架构与项目管理，其余按擅长方向分配开发、前端、测试、评审。只有命令行工具参与分配。</p>
       </div>
       <div class="row">
         <button class="btn" @click="resetAssignments()">恢复推荐</button>
@@ -79,7 +79,6 @@ function save() {
             <tr v-for="a in store.assignments" :key="a.toolId">
               <td>
                 <strong>{{ a.toolName }}</strong>
-                <div v-if="a.manual" class="badge warning">手动执行</div>
               </td>
               <td v-for="r in store.roles" :key="r.id" class="cell">
                 <label class="check">
@@ -87,7 +86,6 @@ function save() {
                     :type="r.id === 'lead' ? 'radio' : 'checkbox'"
                     name="lead"
                     :checked="has(a.toolId, r.id)"
-                    :disabled="r.id === 'lead' && a.manual"
                     @change="toggle(a.toolId, r.id)"
                   />
                   <span class="sr-only">{{ a.toolName }} 担任 {{ r.name }}</span>
@@ -96,6 +94,27 @@ function save() {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <h2 class="sec">运行设置</h2>
+      <div class="card settings">
+        <label class="setting">
+          <span>
+            <strong>同时运行的工具数</strong>
+            <span class="muted small">同一时间最多派发几个任务进程，默认 3，最多 {{ MAX_CONCURRENCY }}</span>
+          </span>
+          <span class="row">
+            <input type="range" min="1" :max="MAX_CONCURRENCY" v-model.number="store.settings.concurrency" @input="saved = false" />
+            <b class="num">{{ store.settings.concurrency }}</b>
+          </span>
+        </label>
+        <label class="setting">
+          <span>
+            <strong>自动合并到主分支</strong>
+            <span class="muted small">集成分支测试通过后，由项目管理直接合并，不再等待确认</span>
+          </span>
+          <input type="checkbox" class="switch" v-model="store.settings.autoMerge" @change="saved = false" />
+        </label>
       </div>
 
       <h2 class="sec">角色说明</h2>
@@ -122,5 +141,11 @@ th:not(:first-child) { text-align: center; }
 .check input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
 .sec { margin: 24px 0 10px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-td .badge { margin-top: 4px; }
+.settings { display: grid; gap: 4px; padding: 8px 16px; }
+.setting { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 0; flex-wrap: wrap; }
+.setting + .setting { border-top: 1px solid var(--border); }
+.setting > span:first-child { display: grid; gap: 2px; }
+.num { min-width: 16px; text-align: right; }
+input[type=range] { accent-color: var(--primary); width: 160px; }
+.switch { width: 18px; height: 18px; accent-color: var(--primary); }
 </style>

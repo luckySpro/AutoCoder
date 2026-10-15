@@ -33,7 +33,7 @@ const commands = computed(() => {
   c.push(`git branch ac/integration ${form.baseBranch}`)
   if (form.mode === 'new' && form.remote) c.push(`git remote add origin ${form.remote}`)
   const lead = store.assignments.find((a) => a.roles.includes('lead'))
-  c.push(`# 交给 ${lead ? toolName(lead.toolId) : '项目管理'} 进行架构设计与任务拆分`)
+  c.push(`# 交给 ${lead ? toolName(lead.toolId) : '项目管理'} 进行架构设计与任务拆分（最多同时运行 ${store.settings.concurrency} 个工具）`)
   return c
 })
 

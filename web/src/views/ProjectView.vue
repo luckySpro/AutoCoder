@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import TaskGraph from '../components/TaskGraph.vue'
-import { roleName, store, toolName } from '../api'
+import { fmtTokens, roleName, store, toolName, totalTokens } from '../api'
 import { boardColumns, statusMeta } from '../status'
 import type { Task } from '../types'
 
@@ -25,6 +25,16 @@ const mergeQueue = computed(() => project.value?.tasks.filter((t) => t.status ==
 
 const worktree = (t: Task) => `../.ac-worktrees/${project.value?.name}/${t.id}`
 const reportsOf = (t: Task) => project.value?.reports.filter((r) => r.taskId === t.id) ?? []
+
+const usage = computed(() => store.usage.filter((r) => r.projectId === project.value?.id))
+const taskTokens = (t: Task) => usage.value.filter((r) => r.taskId === t.id).reduce((n, r) => n + totalTokens(r.usage), 0)
+const taskRuns = (t: Task) => usage.value.filter((r) => r.taskId === t.id).length
+const projectTokens = computed(() => usage.value.reduce((n, r) => n + totalTokens(r.usage), 0))
+const toolTokens = computed(() => {
+  const m = new Map<string, number>()
+  usage.value.forEach((r) => m.set(r.tool, (m.get(r.tool) ?? 0) + totalTokens(r.usage)))
+  return [...m.entries()].sort((a, b) => b[1] - a[1])
+})
 </script>
 
 <template>
@@ -75,6 +85,7 @@ const reportsOf = (t: Task) => project.value?.reports.filter((r) => r.taskId ===
             <dt>分支</dt><dd><code>{{ selected.branch }}</code>（基于 {{ project.integrationBranch }}）</dd>
             <dt>工作区</dt><dd><code>{{ worktree(selected) }}</code></dd>
             <dt>提交</dt><dd>{{ selected.commits }} 个</dd>
+            <dt>Token</dt><dd>{{ fmtTokens(taskTokens(selected)) }}（{{ taskRuns(selected) }} 次调用）<RouterLink to="/usage" class="small"> 明细</RouterLink></dd>
           </dl>
           <h2 class="sub">该任务的汇报</h2>
           <ul class="timeline compact">
@@ -95,11 +106,25 @@ const reportsOf = (t: Task) => project.value?.reports.filter((r) => r.taskId ===
       <aside class="right">
         <div class="card">
           <h2>集成队列</h2>
-          <p class="faint small">项目管理按依赖顺序把任务分支合并到 <code>{{ project.integrationBranch }}</code>，跑测试通过后再合并到 <code>{{ project.baseBranch }}</code>。</p>
+          <p class="faint small">
+            项目管理按依赖顺序把任务分支合并到 <code>{{ project.integrationBranch }}</code>，测试通过后
+            {{ store.settings.autoMerge ? '自动合并' : '等你确认后合并' }}到 <code>{{ project.baseBranch }}</code>。
+          </p>
           <ol class="queue">
             <li v-for="t in mergeQueue" :key="t.id"><code>{{ t.branch }}</code> <span class="faint">← {{ toolName(t.assignee) }}</span></li>
             <li v-if="!mergeQueue.length" class="faint">暂无待集成分支</li>
           </ol>
+        </div>
+        <div class="card">
+          <div class="row between"><h2>Token 用量</h2><RouterLink to="/usage" class="small">计量明细</RouterLink></div>
+          <div class="big">{{ fmtTokens(projectTokens) }}</div>
+          <ul class="tok">
+            <li v-for="[id, n] in toolTokens" :key="id">
+              <span>{{ toolName(id) }}</span>
+              <span class="bar"><span :style="{ width: (projectTokens ? (n / projectTokens) * 100 : 0) + '%' }"></span></span>
+              <span class="mono">{{ fmtTokens(n) }}</span>
+            </li>
+          </ul>
         </div>
         <div class="card">
           <h2>进度汇报</h2>
@@ -151,5 +176,10 @@ dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .timeline p { margin: 4px 0 0; font-size: 13px; }
 .timeline.compact { gap: 6px; margin-bottom: 12px; font-size: 13px; }
 .queue { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; }
+.big { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+.tok { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 12.5px; }
+.tok li { display: grid; grid-template-columns: 110px 1fr auto; gap: 8px; align-items: center; }
+.tok .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.tok .bar span { display: block; height: 100%; background: var(--primary); }
 @media (max-width: 1080px) { .layout { grid-template-columns: 1fr; } }
 </style>

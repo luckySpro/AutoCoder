@@ -7,12 +7,8 @@ import (
 	"github.com/luckySpro/AutoCoder/internal/toolscan"
 )
 
-func tool(id string, cap int, kind toolscan.Kind, strengths ...string) toolscan.Detection {
-	d := toolscan.Detection{Tool: toolscan.Tool{ID: id, Name: id, Kind: kind, Capability: cap, Strengths: strengths}, Installed: true}
-	if kind == toolscan.KindCLI {
-		d.Headless = []string{"-p", "{prompt}"}
-	}
-	return d
+func tool(id string, cap int, strengths ...string) toolscan.Detection {
+	return toolscan.Detection{Tool: toolscan.Tool{ID: id, Name: id, Capability: cap, Strengths: strengths, Headless: []string{"-p", "{prompt}"}}, Installed: true}
 }
 
 func rolesOf(as []Assignment) map[string][]Role {
@@ -30,7 +26,7 @@ func TestNoTools(t *testing.T) {
 }
 
 func TestSingleToolTakesAllRoles(t *testing.T) {
-	got := Suggest([]toolscan.Detection{tool("claude-code", 95, toolscan.KindCLI), {Tool: toolscan.Tool{ID: "codex"}}})
+	got := Suggest([]toolscan.Detection{tool("claude-code", 95), {Tool: toolscan.Tool{ID: "codex"}}})
 	if len(got) != 1 || len(got[0].Roles) != len(All) {
 		t.Fatalf("单工具应承担全部角色: %+v", got)
 	}
@@ -38,34 +34,33 @@ func TestSingleToolTakesAllRoles(t *testing.T) {
 
 func TestClaudeCodexCursor(t *testing.T) {
 	got := rolesOf(Suggest([]toolscan.Detection{
-		tool("cursor", 80, toolscan.KindIDE, "frontend", "coding"),
-		tool("codex", 90, toolscan.KindCLI, "coding", "architecture", "testing"),
-		tool("claude-code", 95, toolscan.KindCLI, "architecture", "coding", "review", "testing"),
+		tool("cursor-agent", 85, "coding", "frontend"),
+		tool("codex", 90, "coding", "architecture", "testing"),
+		tool("claude-code", 95, "architecture", "coding", "review", "testing"),
 	}))
 	want := map[string][]Role{
-		"claude-code": {Lead, Reviewer},    // 评审回落给 lead
-		"codex":       {Developer, Tester}, // 测试由最匹配的 CLI 兼任
-		"cursor":      {Frontend},
+		"claude-code":  {Lead, Reviewer},    // 评审回落给 lead
+		"codex":        {Developer, Tester}, // 测试由最匹配的 CLI 兼任
+		"cursor-agent": {Frontend},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 
-func TestHeadlessPreferredForLead(t *testing.T) {
-	got := Suggest([]toolscan.Detection{
-		tool("ide", 99, toolscan.KindIDE),
-		tool("cli", 50, toolscan.KindCLI),
-	})
-	if got[0].ToolID != "cli" || got[0].Roles[0] != Lead || !got[1].Manual {
-		t.Fatalf("lead 应为可无人值守工具: %+v", got)
+func TestUnschedulableIgnored(t *testing.T) {
+	noTemplate := tool("no-template", 99)
+	noTemplate.Headless = nil
+	got := Suggest([]toolscan.Detection{noTemplate, tool("cli", 50)})
+	if len(got) != 1 || got[0].ToolID != "cli" || len(got[0].Roles) != len(All) {
+		t.Fatalf("没有调用模板的工具不应参与分配: %+v", got)
 	}
 }
 
 func TestExtraToolsBecomeDevelopers(t *testing.T) {
-	ds := []toolscan.Detection{tool("lead", 99, toolscan.KindCLI)}
+	ds := []toolscan.Detection{tool("lead", 99)}
 	for _, id := range []string{"a", "b", "c", "d", "e"} {
-		ds = append(ds, tool(id, 50, toolscan.KindCLI))
+		ds = append(ds, tool(id, 50))
 	}
 	got := Suggest(ds)
 	if got[len(got)-1].Roles[0] != Developer {

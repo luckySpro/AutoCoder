@@ -1,15 +1,15 @@
 # AutoCoder 默认开发工具清单
-# 启动时按此清单检测本机已安装的工具。用户可在 ~/.autocoder/tools.yaml 覆盖或追加条目（按 id 合并）。
+# 只收录命令行（CLI）工具，统一由 AutoCoder 派发和计量。启动时按此清单检测本机已安装的工具。用户可在 ~/.autocoder/tools.yaml 覆盖或追加条目（按 id 合并）。
 #
 # 字段说明：
 #   id          唯一标识
 #   name        显示名称
 #   vendor      厂商
-#   kind        cli（可无人值守调用）| ide（图形界面，只能半自动协作）
 #   commands    依次尝试的可执行文件名（在 PATH 中查找）
 #   paths       额外的绝对路径候选（按操作系统区分：darwin/linux/windows），支持 ~ 展开
 #   version_args 获取版本号的参数
-#   headless    非交互调用模板，{prompt} 会被替换为任务说明；为空表示不能无人值守
+#   headless    非交互调用模板，{prompt} 会被替换为任务说明；没有模板的工具不参与调度
+#   usage_args  追加到 headless 后、让工具输出含 token 用量的结构化结果的参数；为空时按字符数估算
 #   capability  综合能力评分（0-100），用于挑选"最聪明"的工具担任架构/项目管理
 #   strengths   擅长方向：architecture / coding / frontend / testing / review
 
@@ -17,69 +17,56 @@ tools:
   - id: claude-code
     name: Claude Code
     vendor: Anthropic
-    kind: cli
     commands: [claude]
     version_args: ["--version"]
     headless: ["-p", "{prompt}"]
+    usage_args: ["--output-format", "json"]
     capability: 95
     strengths: [architecture, coding, review, testing]
 
   - id: codex
     name: Codex CLI
     vendor: OpenAI
-    kind: cli
     commands: [codex]
     version_args: ["--version"]
     headless: ["exec", "{prompt}"]
+    usage_args: ["--json"]
     capability: 90
     strengths: [coding, architecture, testing]
 
   - id: cursor-agent
     name: Cursor Agent CLI
     vendor: Anysphere
-    kind: cli
     commands: [cursor-agent]
     version_args: ["--version"]
     headless: ["-p", "{prompt}"]
+    usage_args: ["--output-format", "json"]
     capability: 85
     strengths: [coding, frontend]
-
-  - id: cursor
-    name: Cursor IDE
-    vendor: Anysphere
-    kind: ide
-    commands: [cursor]
-    paths:
-      darwin: ["/Applications/Cursor.app"]
-      windows: ["~/AppData/Local/Programs/cursor/Cursor.exe"]
-    version_args: ["--version"]
-    capability: 80
-    strengths: [frontend, coding]
 
   - id: gemini-cli
     name: Gemini CLI
     vendor: Google
-    kind: cli
     commands: [gemini]
     version_args: ["--version"]
     headless: ["-p", "{prompt}"]
+    usage_args: ["--output-format", "json"]
     capability: 85
     strengths: [coding, review, frontend]
 
   - id: qwen-code
     name: Qwen Code
     vendor: Alibaba
-    kind: cli
     commands: [qwen]
     version_args: ["--version"]
     headless: ["-p", "{prompt}"]
+    usage_args: ["--output-format", "json"]
     capability: 75
     strengths: [coding, testing]
 
   - id: copilot-cli
     name: GitHub Copilot CLI
     vendor: GitHub
-    kind: cli
     commands: [copilot]
     version_args: ["--version"]
     headless: ["-p", "{prompt}"]
@@ -89,7 +76,6 @@ tools:
   - id: opencode
     name: OpenCode
     vendor: SST
-    kind: cli
     commands: [opencode]
     version_args: ["--version"]
     headless: ["run", "{prompt}"]
@@ -99,31 +85,8 @@ tools:
   - id: aider
     name: Aider
     vendor: Aider
-    kind: cli
     commands: [aider]
     version_args: ["--version"]
     headless: ["--message", "{prompt}", "--yes-always"]
     capability: 70
     strengths: [coding, testing]
-
-  - id: windsurf
-    name: Windsurf
-    vendor: Windsurf
-    kind: ide
-    commands: [windsurf]
-    paths:
-      darwin: ["/Applications/Windsurf.app"]
-    version_args: ["--version"]
-    capability: 75
-    strengths: [frontend, coding]
-
-  - id: trae
-    name: Trae
-    vendor: ByteDance
-    kind: ide
-    commands: [trae]
-    paths:
-      darwin: ["/Applications/Trae.app"]
-    version_args: ["--version"]
-    capability: 70
-    strengths: [frontend, coding]

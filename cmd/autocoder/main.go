@@ -61,13 +61,16 @@ func printTools(manifest string) {
 	}
 	ds := toolscan.NewScanner().Scan(context.Background(), m)
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "状态\t工具\t类型\t版本\t路径")
+	fmt.Fprintln(w, "状态\t工具\t版本\t用量\t路径")
 	for _, d := range ds {
-		mark := "  -"
+		mark, usage := "  -", ""
 		if d.Installed {
-			mark = "  ✓"
+			mark, usage = "  ✓", "估算"
+			if d.ExactUsage() {
+				usage = "精确"
+			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", mark, d.Name, d.Kind, d.Version, d.Path)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", mark, d.Name, d.Version, usage, d.Path)
 	}
 	w.Flush()
 
@@ -85,10 +88,6 @@ func printTools(manifest string) {
 		for _, r := range a.Roles {
 			rs = append(rs, names[r])
 		}
-		suffix := ""
-		if a.Manual {
-			suffix = "（需在工具内手动执行）"
-		}
-		fmt.Printf("  %-18s %s%s\n", a.ToolName, strings.Join(rs, "、"), suffix)
+		fmt.Printf("  %-18s %s\n", a.ToolName, strings.Join(rs, "、"))
 	}
 }

@@ -2,10 +2,11 @@
 //
 // 规则（见 docs/DESIGN.md §3）：
 //  1. 只有一个可用工具时，它承担全部角色。
-//  2. 多个工具时，能力评分最高且可无人值守调用的工具担任"架构与项目管理"（lead）。
+//     只有已安装且有非交互调用模板的 CLI 工具参与分配。
+//  2. 多个工具时，能力评分最高的工具担任"架构与项目管理"（lead）。
 //  3. 其余工具按"擅长方向匹配度 + 能力评分"依次认领开发、前端/视觉、测试、评审。
-//  4. 工具不够分时：评审回落给 lead（它负责合并把关）；其余角色交给最匹配的可无人值守工具兼任，
-//     没有合适的则回落给 lead。多出来的工具作为额外开发者并行接任务。
+//  4. 工具不够分时：评审回落给 lead（它负责合并把关）；其余角色交给最匹配的工具兼任。
+//     多出来的工具作为额外开发者并行接任务。
 package roles
 
 import (
@@ -48,33 +49,24 @@ type Assignment struct {
 	ToolID   string `json:"toolId"`
 	ToolName string `json:"toolName"`
 	Roles    []Role `json:"roles"`
-	// Manual 表示该工具无法无人值守调用（如 IDE），派发的任务需要用户在工具内手动执行。
-	Manual bool `json:"manual"`
 }
 
-// Suggest 返回默认分配；输入中未安装或已禁用的工具会被忽略。
+// Suggest 返回默认分配；未安装、已禁用或不可调度的工具会被忽略。
 func Suggest(detected []toolscan.Detection) []Assignment {
 	var avail []toolscan.Detection
 	for _, d := range detected {
-		if d.Installed && !d.Disabled {
+		if d.Schedulable() && !d.Disabled {
 			avail = append(avail, d)
 		}
 	}
 	if len(avail) == 0 {
 		return nil
 	}
-	// 可无人值守的优先，其次按能力评分。
-	sort.SliceStable(avail, func(a, b int) bool {
-		ha, hb := avail[a].CanRunHeadless(), avail[b].CanRunHeadless()
-		if ha != hb {
-			return ha
-		}
-		return avail[a].Capability > avail[b].Capability
-	})
+	sort.SliceStable(avail, func(a, b int) bool { return avail[a].Capability > avail[b].Capability })
 
 	out := make([]Assignment, len(avail))
 	for i, d := range avail {
-		out[i] = Assignment{ToolID: d.ID, ToolName: d.Name, Manual: !d.CanRunHeadless()}
+		out[i] = Assignment{ToolID: d.ID, ToolName: d.Name}
 	}
 	if len(avail) == 1 {
 		for _, r := range All {
@@ -101,11 +93,11 @@ func Suggest(detected []toolscan.Detection) []Assignment {
 			out[best+1].Roles = []Role{r.ID}
 			continue
 		}
-		// 人手不足：找最匹配的可无人值守工具兼任。
+		// 人手不足：找最匹配的工具兼任。
 		owner := 0
 		if r.ID != Reviewer {
 			for i, d := range rest {
-				if d.CanRunHeadless() && (owner == 0 || score(d, r) > score(rest[owner-1], r)) {
+				if owner == 0 || score(d, r) > score(rest[owner-1], r) {
 					owner = i + 1
 				}
 			}
@@ -120,14 +112,11 @@ func Suggest(detected []toolscan.Detection) []Assignment {
 	return out
 }
 
-// score：擅长方向命中加 100 分，再叠加能力评分；IDE 类工具在测试/评审上减分，因为它们无法自动执行。
+// score：擅长方向命中加 100 分，再叠加能力评分。
 func score(d toolscan.Detection, r Info) int {
 	s := d.Capability
 	if slices.Contains(d.Strengths, r.Strength) {
 		s += 100
-	}
-	if !d.CanRunHeadless() && (r.ID == Tester || r.ID == Reviewer) {
-		s -= 150
 	}
 	return s
 }

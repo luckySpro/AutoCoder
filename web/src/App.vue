@@ -8,6 +8,7 @@ const installed = computed(() => store.tools.filter((t) => t.installed).length)
 
 const nav = [
   { to: '/projects', label: '项目', icon: '▦' },
+  { to: '/usage', label: 'Token 用量', icon: '∑' },
   { to: '/roles', label: '角色分配', icon: '◎' },
   { to: '/tools', label: '启动检查', icon: '✓' },
 ]
@@ -37,7 +38,7 @@ const nav = [
     </aside>
     <main class="main">
       <div v-if="store.demo" class="notice" role="status">
-        未连接到本地服务（{{ store.error }}），当前显示演示数据。运行 <code>go run ./cmd/autocoder</code> 后刷新即可看到本机真实检测结果。
+        当前是演示数据：没有连接到本机的 AutoCoder 服务。在本机运行 <code>autocoder</code> 后打开 127.0.0.1:7788 即可看到真实检测结果。
       </div>
       <RouterView />
     </main>

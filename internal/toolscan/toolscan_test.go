@@ -18,12 +18,15 @@ func TestDefaultManifestLoads(t *testing.T) {
 		if tool.ID == "" || tool.Name == "" || len(tool.Commands) == 0 {
 			t.Errorf("条目不完整: %+v", tool)
 		}
+		if len(tool.Headless) == 0 {
+			t.Errorf("%s 缺少 headless 调用模板", tool.ID)
+		}
 		if seen[tool.ID] {
 			t.Errorf("重复 id: %s", tool.ID)
 		}
 		seen[tool.ID] = true
 	}
-	for _, id := range []string{"claude-code", "codex", "cursor"} {
+	for _, id := range []string{"claude-code", "codex", "cursor-agent"} {
 		if !seen[id] {
 			t.Errorf("默认清单缺少 %s", id)
 		}
@@ -52,7 +55,7 @@ func TestScan(t *testing.T) {
 			return "", errors.New("not found")
 		},
 		Stat: func(p string) (os.FileInfo, error) {
-			if p == "/Applications/Cursor.app" {
+			if p == "/opt/cursor/cursor-agent" {
 				return nil, nil
 			}
 			return nil, os.ErrNotExist
@@ -64,15 +67,15 @@ func TestScan(t *testing.T) {
 	}
 	m := Manifest{Tools: []Tool{
 		{ID: "codex", Commands: []string{"codex"}, Capability: 90},
-		{ID: "cursor", Kind: KindIDE, Commands: []string{"cursor"}, Paths: map[string][]string{"darwin": {"/Applications/Cursor.app"}}, VersionArgs: []string{"--version"}, Capability: 80},
-		{ID: "claude-code", Kind: KindCLI, Commands: []string{"claude"}, VersionArgs: []string{"--version"}, Headless: []string{"-p", "{prompt}"}, Capability: 95},
+		{ID: "cursor-agent", Commands: []string{"cursor-agent"}, Paths: map[string][]string{"darwin": {"/opt/cursor/cursor-agent"}}, Capability: 80},
+		{ID: "claude-code", Commands: []string{"claude"}, VersionArgs: []string{"--version"}, Headless: []string{"-p", "{prompt}"}, UsageArgs: []string{"--output-format", "json"}, Capability: 95},
 	}}
 	got := s.Scan(context.Background(), m)
-	if got[0].ID != "claude-code" || !got[0].Installed || got[0].Version != "2.0.14" || !got[0].CanRunHeadless() {
+	if got[0].ID != "claude-code" || !got[0].Installed || got[0].Version != "2.0.14" || !got[0].Schedulable() || !got[0].ExactUsage() {
 		t.Errorf("claude-code 检测不符: %+v", got[0])
 	}
-	if got[1].ID != "cursor" || !got[1].Installed || got[1].Version != "" || got[1].CanRunHeadless() {
-		t.Errorf("cursor 检测不符: %+v", got[1])
+	if got[1].ID != "cursor-agent" || !got[1].Installed || got[1].Path != "/opt/cursor/cursor-agent" || got[1].Schedulable() {
+		t.Errorf("cursor-agent 检测不符（平台路径命中、无调用模板不可调度）: %+v", got[1])
 	}
 	if got[2].ID != "codex" || got[2].Installed {
 		t.Errorf("codex 应未安装: %+v", got[2])

@@ -21,24 +21,16 @@ import (
 //go:embed tools.yaml
 var defaultManifest []byte
 
-// Kind 表示工具形态。
-type Kind string
-
-const (
-	KindCLI Kind = "cli" // 可无人值守调用
-	KindIDE Kind = "ide" // 图形界面，只能半自动协作
-)
-
-// Tool 是清单中的一个条目。
+// Tool 是清单中的一个条目。只收录命令行工具，统一由编排器派发与计量。
 type Tool struct {
 	ID          string              `yaml:"id" json:"id"`
 	Name        string              `yaml:"name" json:"name"`
 	Vendor      string              `yaml:"vendor" json:"vendor"`
-	Kind        Kind                `yaml:"kind" json:"kind"`
 	Commands    []string            `yaml:"commands" json:"commands"`
 	Paths       map[string][]string `yaml:"paths" json:"paths,omitempty"`
 	VersionArgs []string            `yaml:"version_args" json:"versionArgs,omitempty"`
 	Headless    []string            `yaml:"headless" json:"headless,omitempty"`
+	UsageArgs   []string            `yaml:"usage_args" json:"usageArgs,omitempty"`
 	Capability  int                 `yaml:"capability" json:"capability"`
 	Strengths   []string            `yaml:"strengths" json:"strengths"`
 	Disabled    bool                `yaml:"disabled" json:"disabled,omitempty"`
@@ -58,9 +50,14 @@ type Detection struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// CanRunHeadless 表示该工具能否被编排器直接派发任务。
-func (d Detection) CanRunHeadless() bool {
-	return d.Installed && d.Kind == KindCLI && len(d.Headless) > 0
+// Schedulable 表示该工具能否被编排器派发任务（已安装且有非交互调用模板）。
+func (d Detection) Schedulable() bool {
+	return d.Installed && len(d.Headless) > 0
+}
+
+// ExactUsage 表示该工具能输出结构化的 token 用量；否则按字符数估算。
+func (d Detection) ExactUsage() bool {
+	return len(d.UsageArgs) > 0
 }
 
 // LoadManifest 读取内置清单，并按 id 合并用户清单（userPath 为空或不存在时忽略）。
@@ -174,8 +171,7 @@ func (s *Scanner) detect(ctx context.Context, t Tool) Detection {
 			}
 		}
 	}
-	// 只对 PATH 中的命令取版本；.app 目录无法直接执行。
-	if d.Installed && len(t.VersionArgs) > 0 && !strings.HasSuffix(d.Path, ".app") {
+	if d.Installed && len(t.VersionArgs) > 0 {
 		vctx, cancel := context.WithTimeout(ctx, s.Timeout)
 		defer cancel()
 		v, err := s.RunVersion(vctx, d.Path, t.VersionArgs)
