@@ -6,6 +6,7 @@ import RolesView from './views/RolesView.vue'
 import ProjectsView from './views/ProjectsView.vue'
 import ProjectView from './views/ProjectView.vue'
 import UsageView from './views/UsageView.vue'
+import LiveView from './views/LiveView.vue'
 import './styles.css'
 
 const router = createRouter({
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: '/roles', component: RolesView, meta: { title: '角色分配' } },
     { path: '/projects', component: ProjectsView, meta: { title: '项目' } },
     { path: '/projects/:id', component: ProjectView, meta: { title: '项目' } },
+    { path: '/live', component: LiveView, meta: { title: '运行监控' } },
     { path: '/usage', component: UsageView, meta: { title: 'Token 用量' } },
     { path: '/:pathMatch(.*)*', redirect: '/projects' },
   ],

@@ -6,6 +6,8 @@ import { fmtTokens, roleName, store, toolName, totalTokens } from '../api'
 import AgentMark from '../components/AgentMark.vue'
 import BranchLanes from '../components/BranchLanes.vue'
 import Icon from '../components/Icon.vue'
+import LiveConsole from '../components/LiveConsole.vue'
+import { runKey, runs } from '../live'
 import TaskGraph from '../components/TaskGraph.vue'
 import { boardColumns, statusMeta } from '../status'
 import type { Task } from '../types'
@@ -38,6 +40,10 @@ const toolTokens = computed(() => {
   usage.value.forEach((r) => m.set(r.tool, (m.get(r.tool) ?? 0) + totalTokens(r.usage)))
   return [...m.entries()].sort((a, b) => b[1] - a[1])
 })
+const lastAct = (projectId: string, taskId: string) => {
+  const a = runs.get(runKey(projectId, taskId))?.acts.at(-1)
+  return a ? (a.kind === 'say' ? '回复中' : a.text.split('/').pop()) : ''
+}
 const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:/]/, '').replace(/\.git$/, ''))
 </script>
 
@@ -93,6 +99,10 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
             <dt>提交</dt><dd class="num">{{ selected.commits }}</dd>
             <dt>Token</dt><dd><b class="num">{{ fmtTokens(taskTokens(selected)) }}</b><span class="faint small">{{ taskRuns(selected) }} 次调用</span><RouterLink to="/usage" class="small">明细</RouterLink></dd>
           </dl>
+          <template v-if="runs.has(runKey(project.id, selected.id))">
+            <h3 class="sub">实时输出</h3>
+            <LiveConsole :run-id="runKey(project.id, selected.id)" :height="280" />
+          </template>
           <h3 class="sub">汇报</h3>
           <ul class="feed compact">
             <li v-for="r in reportsOf(selected)" :key="r.id">
@@ -104,7 +114,8 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
           </ul>
           <div class="row">
             <button class="btn sm" disabled title="M2 接入"><Icon name="play" />派发</button>
-            <button class="btn sm" disabled title="M2 接入"><Icon name="terminal" />查看日志</button>
+            <RouterLink v-if="runs.has(runKey(project.id, selected.id))" :to="`/live?run=${project.id}/${selected.id}`" class="btn sm"><Icon name="terminal" />运行监控</RouterLink>
+            <button v-else class="btn sm" disabled title="M2 接入"><Icon name="terminal" />历史日志</button>
             <button class="btn sm" disabled title="M2 接入"><Icon name="branch" />查看 diff</button>
           </div>
         </div>
@@ -115,9 +126,12 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
           <div class="panel-head"><h2>正在运行</h2><span class="hint num">{{ running.length }}/{{ store.settings.concurrency }} 槽</span></div>
           <ul class="runs">
             <li v-for="r in running" :key="r.tool + r.taskId">
-              <AgentMark :id="r.tool" :size="26" />
-              <span class="grow"><b>{{ r.taskId }}</b> <span class="muted">{{ roleName(r.role) }}</span><br /><span class="faint small">{{ toolName(r.tool) }} · {{ r.startedAt }} 开始</span></span>
-              <span class="live" aria-label="运行中"></span>
+              <RouterLink :to="`/live?run=${r.projectId}/${r.taskId}`" class="run-link" :title="`查看 ${r.taskId} 的实时输出`">
+                <AgentMark :id="r.tool" :size="26" />
+                <span class="grow"><b>{{ r.taskId }}</b> <span class="muted">{{ roleName(r.role) }}</span><br /><span class="faint small">{{ toolName(r.tool) }} · {{ r.startedAt }} 开始</span></span>
+                <span class="tail mono small faint">{{ lastAct(r.projectId, r.taskId) }}</span>
+                <span class="live" aria-label="运行中"></span>
+              </RouterLink>
             </li>
             <li v-if="!running.length" class="faint small">没有正在运行的工具</li>
           </ul>
@@ -191,6 +205,9 @@ dd { margin: 0; min-width: 0; display: flex; gap: 8px; align-items: center; flex
 .runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .runs li { display: flex; gap: 10px; align-items: center; font-size: 13px; line-height: 1.35; }
 .grow { flex: 1; min-width: 0; }
+.run-link { display: flex; gap: 10px; align-items: center; width: 100%; color: var(--ink); text-decoration: none; padding: 6px; margin: -6px; border-radius: var(--r); }
+.run-link:hover { background: var(--sunken); text-decoration: none; }
+.tail { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent); }
 .queue { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
 .queue li .branch { box-shadow: inset 2px 0 0 var(--c); }

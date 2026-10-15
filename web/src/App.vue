@@ -4,8 +4,12 @@ import { agent } from './agents'
 import { scanTools, store, toolName } from './api'
 import AgentMark from './components/AgentMark.vue'
 import Icon from './components/Icon.vue'
+import { startLive } from './live'
 
-onMounted(() => scanTools())
+onMounted(() => {
+  scanTools()
+  startLive()
+})
 
 const crew = computed(() => store.tools.filter((t) => t.installed && !t.disabled && t.headless?.length))
 const roleOf = (id: string) => store.assignments.find((a) => a.toolId === id)?.roles ?? []
@@ -17,6 +21,7 @@ const slots = computed(() =>
 
 const nav = [
   { to: '/projects', label: '项目', icon: 'projects' },
+  { to: '/live', label: '运行监控', icon: 'terminal' },
   { to: '/usage', label: 'Token 用量', icon: 'usage' },
   { to: '/roles', label: '角色与运行', icon: 'roles' },
   { to: '/tools', label: '工具清单', icon: 'tools' },
@@ -41,6 +46,7 @@ const nav = [
       <nav aria-label="主导航">
         <RouterLink v-for="n in nav" :key="n.to" :to="n.to" class="nav-item">
           <Icon :name="n.icon" />{{ n.label }}
+          <span v-if="n.to === '/live' && store.running.length" class="count num">{{ store.running.length }}</span>
         </RouterLink>
       </nav>
 
@@ -65,17 +71,18 @@ const nav = [
           <span>运行槽</span><span class="num">{{ store.running.length }}/{{ store.settings.concurrency }}</span>
         </div>
         <div class="slot-row">
-          <span v-for="(s, i) in slots" :key="i" class="slot" :class="{ used: s }"
-            :style="s ? { '--c': agent(s.tool).color } : {}" :title="s ? `${toolName(s.tool)} · ${s.taskId}` : '空闲'">
-            <template v-if="s">{{ s.taskId }}</template>
-          </span>
+          <template v-for="(s, i) in slots" :key="i">
+            <RouterLink v-if="s" :to="`/live?run=${s.projectId}/${s.taskId}`" class="slot used" :style="{ '--c': agent(s.tool).color }"
+              :title="`${toolName(s.tool)} · ${s.taskId}，点击查看实时输出`">{{ s.taskId }}</RouterLink>
+            <span v-else class="slot" title="空闲"></span>
+          </template>
         </div>
       </section>
     </aside>
 
     <main class="work">
       <div v-if="store.demo" class="notice" role="status">
-        当前是演示数据，没有连接到本机的 AutoCoder 服务。在本机运行 <code>autocoder</code> 后打开 <code>127.0.0.1:7788</code> 即可管理真实的工具与仓库。
+        <span>当前是演示数据，没有连接到本机的 AutoCoder 服务。在本机运行 <code>autocoder</code> 后打开 <code>127.0.0.1:7788</code> 即可管理真实的工具与仓库。</span>
       </div>
       <RouterView />
     </main>
@@ -115,7 +122,9 @@ nav { display: grid; gap: 2px; }
   height: 30px; border-radius: 7px; border: 1px dashed var(--rail-line); display: grid; place-items: center;
   font: 600 11px var(--font-mono); color: var(--rail-ink);
 }
-.slot.used { border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 22%, var(--rail)); }
+.slot.used { border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 22%, var(--rail)); text-decoration: none; }
+.slot.used:hover { background: color-mix(in srgb, var(--c) 36%, var(--rail)); }
+.count { margin-left: auto; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px; display: grid; place-items: center; font-size: 11px; background: #4fd18b; color: #08130d; }
 .work { padding: 28px 32px 48px; min-width: 0; display: grid; gap: 20px; align-content: start; max-width: 1440px; }
 
 @media (max-width: 860px) {

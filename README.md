@@ -11,7 +11,7 @@
 - ✅ 工具清单与启动检测，清单在界面上直接增删改、启停、导入导出（`internal/toolscan`）
 - ✅ 默认角色分配（`internal/roles`）
 - ✅ 读取本机 git 身份与 GitHub 账号仓库，像 Claude Code 一样添加项目（`internal/gitinfo`）
-- ✅ 界面原型：项目列表、项目详情（分支泳道/依赖图/看板）、Token 用量、角色与运行、工具清单，深浅双主题
+- ✅ 界面原型：项目列表、项目详情（分支泳道/依赖图/看板）、运行监控（实时 CLI 输出，目前为模拟数据）、Token 用量、角色与运行、工具清单，深浅双主题
 - ⏳ 项目与任务的真实 git 操作、任务派发与汇报解析（见路线图）
 
 ## 快速开始
@@ -40,5 +40,7 @@ npm --prefix web run dev        # Vite 开发服务器，/api 自动转发
 | ![](docs/screenshots/projects.png) | ![](docs/screenshots/project-lanes-dark.png) |
 | **添加项目** | **工具清单** |
 | ![](docs/screenshots/add-project.png) | ![](docs/screenshots/tools.png) |
+| **运行监控（实时 CLI 输出）** | **项目详情中的实时输出** |
+| ![](docs/screenshots/live-dark.png) | ![](docs/screenshots/live-in-project.png) |
 | **编辑工具** | **Token 用量** |
 | ![](docs/screenshots/tool-editor.png) | ![](docs/screenshots/usage.png) |

@@ -54,6 +54,16 @@
   --rail-line: #2a2e33;
   --rail-ink: #e9ebe6;
   --rail-ink-2: #9097a0;
+  /* 终端输出：两种主题下都用深色 */
+  --term-bg: #101214;
+  --term-bg-2: #0b0c0e;
+  --term-line: #24282d;
+  --term-ink: #e4e7e2;
+  --term-dim: #8a919a;
+  --term-cmd: #8fb4ff;
+  --term-ok: #5fd39a;
+  --term-warn: #f0b354;
+  --term-bad: #ff8a80;
   /* 字体 */
   --font-display: 'Bricolage Grotesque', 'Geist', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-body: 'Geist', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;

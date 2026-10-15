@@ -23,6 +23,7 @@ const paths: Record<string, string> = {
   check: 'M5 12.5l4.5 4.5L19 7',
   play: 'M8 5.5v13l10-6.5z',
   merge: 'M6 3v18M6 9a9 9 0 0 0 9 9h3M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  alert: 'M12 4l9 16H3zM12 10v4M12 17v.5',
   terminal: 'M4 5h16v14H4zM7.5 9.5l3 2.5-3 2.5M12.5 15h4',
 }
 </script>
