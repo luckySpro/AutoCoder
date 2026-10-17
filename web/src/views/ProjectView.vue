@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { agent } from '../agents'
-import { deliverProject, fmtTokens, logURL, roleName, store, taskAction, toolName, totalTokens, updateProject } from '../api'
+import { deliverProject, fmtTokens, logURL, roleName, store, taskAction, toolName, totalTokens, updateProject, updateTask } from '../api'
 import AgentMark from '../components/AgentMark.vue'
 import BranchLanes from '../components/BranchLanes.vue'
 import Icon from '../components/Icon.vue'
@@ -19,6 +19,17 @@ const project = computed(() => store.projects.find((p) => p.id === route.params.
 const view = ref<'lanes' | 'graph' | 'board'>('lanes')
 const selectedId = ref<string>()
 const selected = computed(() => project.value?.tasks.find((t) => t.id === selectedId.value))
+const detailEl = ref<HTMLElement>()
+// 选中任务并把详情滚到眼前（托盘和项目列表的「等你处理」会带 ?task=T1 过来）
+async function focusTask(id: string) {
+  selectedId.value = id
+  await nextTick()
+  detailEl.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
+watch(() => [route.query.task, project.value?.tasks.length], () => {
+  const id = route.query.task
+  if (typeof id === 'string' && project.value?.tasks.some((t) => t.id === id)) focusTask(id)
+}, { immediate: true })
 
 const columns = computed(() => {
   const ts = project.value?.tasks ?? []
@@ -64,6 +75,16 @@ const canEdit = (t: Task) => !['running', 'testing', 'integrating', 'merged'].in
 const canRetry = (t: Task) => ['ready', 'blocked', 'cancelled', 'waiting-user', 'planned'].includes(t.status) && !t.waiting?.includes('确认改动')
 const canApprove = (t: Task) => t.status === 'waiting-user' && !!t.waiting?.includes('确认改动')
 const canCancel = (t: Task) => !['merged', 'cancelled'].includes(t.status)
+// 换一个工具接手：先改负责工具，再放回派发队列
+const usableTools = computed(() => store.tools.filter((t) => t.installed && !t.disabled && t.headless?.length))
+async function retryWith(t: Task, tool: string) {
+  if (!project.value || !tool) return
+  const id = project.value.id
+  await act('retry', async () => {
+    if (tool !== t.assignee) await updateTask(id, t.id, { assignee: tool })
+    await taskAction(id, t.id, 'retry')
+  }, `${t.id} 已交给 ${toolName(tool)} 重新开始`)
+}
 const attempts = (t: Task) => Array.from({ length: t.attempts ?? 0 }, (_, i) => i + 1)
 function saved(id: string) {
   editing.value = null
@@ -160,8 +181,19 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
           <span class="small">已用 {{ fmtTokens(spent) }} / 预算 {{ fmtTokens(budget) }}，这个项目暂停派发。提高预算后自动继续。</span>
         </li>
         <li v-for="t in waiting" :key="t.id">
-          <button class="linkish" @click="selectedId = t.id"><b class="mono">{{ t.id }}</b> {{ t.title }}</button>
-          <span class="small">{{ t.waiting || t.lastError }}</span>
+          <button class="linkish" @click="focusTask(t.id)"><b class="mono">{{ t.id }}</b> {{ t.title }}</button>
+          <span class="small msg">{{ t.waiting || t.lastError }}</span>
+          <span v-if="t.waiting && t.lastError && !t.waiting.includes(t.lastError)" class="small faint msg">上次的问题：{{ t.lastError }}</span>
+          <div class="row quick">
+            <button v-if="canApprove(t)" class="btn sm primary" :disabled="!!busy" @click="act('approve', () => taskAction(project!.id, t.id, 'approve'), '已确认，开始验证和合并')"><Icon name="check" />确认改动</button>
+            <button v-if="canRetry(t)" class="btn sm primary" :disabled="!!busy" @click="act('retry', () => taskAction(project!.id, t.id, 'retry'), `${t.id} 已放回派发队列`)"><Icon name="play" />重试</button>
+            <select v-if="canRetry(t) && usableTools.length > 1" class="sm" :disabled="!!busy" :aria-label="`换一个工具重试 ${t.id}`" @change="retryWith(t, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''">
+              <option value="">换工具重试…</option>
+              <option v-for="x in usableTools" :key="x.id" :value="x.id" :disabled="x.id === t.assignee">{{ x.name }}</option>
+            </select>
+            <button v-if="canEdit(t)" class="btn sm" @click="editing = t"><Icon name="edit" />修改说明</button>
+            <button class="btn sm ghost" @click="focusTask(t.id)">详情与日志</button>
+          </div>
         </li>
       </ul>
     </div>
@@ -192,7 +224,7 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
           </div>
         </div>
 
-        <div v-if="selected" class="panel detail" :style="{ '--c': agent(selected.assignee).color }">
+        <div v-if="selected" ref="detailEl" class="panel detail" :style="{ '--c': agent(selected.assignee).color }">
           <div class="row between">
             <h2><span class="mono tid">{{ selected.id }}</span> {{ selected.title }}</h2>
             <button class="btn ghost sm" aria-label="关闭详情" @click="selectedId = undefined"><Icon name="close" /></button>
@@ -378,7 +410,11 @@ dd { margin: 0; min-width: 0; display: flex; gap: 8px; align-items: center; flex
 .notice.bad { border-color: var(--bad); background: var(--bad-soft); }
 .waiting { border-color: var(--bad); }
 .waiting ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.waiting li { display: grid; gap: 2px; font-size: 13px; }
+.waiting li { display: grid; gap: 4px; font-size: 13px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.waiting li:last-child { border-bottom: 0; padding-bottom: 0; }
+.waiting .msg { white-space: pre-line; overflow-wrap: anywhere; max-height: 6.5em; overflow: auto; }
+.waiting .quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.waiting select.sm { width: auto; flex: 0 0 auto; height: 28px; font-size: 12px; padding: 0 6px; }
 .linkish { font: inherit; background: none; border: 0; padding: 0; color: var(--ink); cursor: pointer; text-align: left; font-weight: 600; }
 .linkish:hover { color: var(--accent); }
 .empty-tasks { display: grid; gap: 10px; justify-items: start; padding: 28px; }
