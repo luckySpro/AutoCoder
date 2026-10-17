@@ -1,0 +1,4 @@
+/bin/
+/dist/
+internal/server/dist/*
+!internal/server/dist/.keep

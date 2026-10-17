@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: 前端构建
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+          node scripts/sync-web.mjs
+      - name: Go 检查与测试
+        run: |
+          go vet ./...
+          go vet -tags tray ./...
+          go test -race ./...
+      - name: 桌面版能在 Linux 和 Windows 上编译
+        run: |
+          CGO_ENABLED=0 go build -tags tray -o /dev/null ./cmd/autocoder
+          CGO_ENABLED=0 GOOS=windows go build -tags tray -o /dev/null ./cmd/autocoder
+
+  desktop-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: 桌面版在 macOS 上编译（需要 CGO）
+        run: CGO_ENABLED=1 go build -tags tray -o /dev/null ./cmd/autocoder
