@@ -91,7 +91,7 @@ func Build(s server.Summary, base string) Menu {
 			if it.ID != "" {
 				text = it.ProjectName + " · " + it.ID + " " + it.Text
 			}
-			m.Waiting = append(m.Waiting, Item{clip(text, 64), projectLink(base, it.ProjectID)})
+			m.Waiting = append(m.Waiting, Item{clip(text, 64), taskLink(base, it.ProjectID, it.ID)})
 		}
 	}
 
@@ -147,6 +147,15 @@ func projectLink(base, id string) string {
 		return base + "/"
 	}
 	return base + "/#/projects/" + url.PathEscape(id)
+}
+
+// taskLink 打开项目并直接选中这个任务（需求编号或空时只打开项目）。
+func taskLink(base, projectID, taskID string) string {
+	link := projectLink(base, projectID)
+	if projectID != "" && taskID != "" {
+		link += "?task=" + url.QueryEscape(taskID)
+	}
+	return link
 }
 
 func clip(s string, n int) string {

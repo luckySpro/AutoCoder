@@ -492,15 +492,11 @@ func (e *Engine) attempt(ctx context.Context, p *project.Project, taskID string,
 	}
 	startSHA, _ := gitops.RevParse(ctx, dir, "HEAD")
 
-	// 2. 环境准备（只在新建 worktree 时）
+	// 2. 环境准备（只在新建 worktree 时）。失败不拦住任务：搭骨架的任务里
+	// package.json 等还不存在，npm install 必然失败；交给工具自己装依赖，验证环节会兜底。
 	if fresh && p.SetupCommand != "" {
-		ok, _ := e.shellStep(ctx, dir, p.SetupCommand, run, logf, run.slot)
-		if !ok {
-			e.finish(p, t.ID, run, "failed", func(t *project.Task) {
-				t.Status = project.WaitingUser
-				t.Waiting = "环境准备命令失败：" + p.SetupCommand + "。修好后点「重试」。"
-			})
-			return
+		if ok, _ := e.shellStep(ctx, dir, p.SetupCommand, run, logf, run.slot); !ok {
+			say("环境准备命令失败（"+p.SetupCommand+"），继续交给工具处理", "warn")
 		}
 	}
 

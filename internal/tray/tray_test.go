@@ -29,7 +29,7 @@ func TestBuildMenu(t *testing.T) {
 	if got := m.Running[0]; got.Text != "T2 商品列表页 · Codex CLI 评审中 · shop-admin" || got.Link != "http://127.0.0.1:7788/#/projects/shop%20admin" {
 		t.Fatalf("%+v", got)
 	}
-	if m.WaitHeader != "等你处理 1" || m.Waiting[0].Text != "shop-admin · R3 计划等你确认" {
+	if m.WaitHeader != "等你处理 1" || m.Waiting[0].Text != "shop-admin · R3 计划等你确认" || m.Waiting[0].Link != "http://127.0.0.1:7788/#/projects/shop%20admin?task=R3" {
 		t.Fatalf("%+v", m)
 	}
 	if m.Usage != "今日用量 85.7K token · 7 次调用" || m.Tools[0] != "Claude Code  73.3K" {

@@ -62,7 +62,7 @@ function added(id: string) {
         <p class="muted">从你的 GitHub 账号或本机目录里选一个仓库，AutoCoder 会建好集成分支，之后每个任务各占一条分支和一个 worktree。</p>
         <button class="btn primary" @click="adding = true"><Icon name="plus" />添加第一个项目</button>
       </div>
-      <RouterLink v-for="p in store.projects" :key="p.id" :to="`/projects/${p.id}`" class="proj">
+      <RouterLink v-for="p in store.projects" :key="p.id" :to="blocked(p).length ? `/projects/${p.id}?task=${blocked(p)[0].id}` : `/projects/${p.id}`" class="proj">
         <div class="id">
           <h2 class="mono">{{ p.name }}</h2>
           <p class="muted">{{ p.description }}</p>
