@@ -90,25 +90,6 @@ jobs:
         run: |
           npm ci
           npx tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config '{"version":"0.0.0"}'
-      - name: 临时排查：v0.1.0 的 Mac 版为什么闪退
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download v0.1.0 --repo "$GITHUB_REPOSITORY" --pattern 'AutoCoder-macos-universal.dmg' --dir old
-          hdiutil attach -nobrowse -mountpoint /tmp/oldac old/AutoCoder-macos-universal.dmg
-          codesign --verify --deep --strict --verbose=2 /tmp/oldac/AutoCoder.app || true
-          H=$(mktemp -d)
-          (HOME=$H /tmp/oldac/AutoCoder.app/Contents/MacOS/autocoder > old.log 2>&1; echo "退出码 $?" >> old.log) &
-          sleep 15
-          cat old.log
-          cat $H/.autocoder/autocoder.log || true
-          pkill -f oldac/AutoCoder.app || true
-          sleep 2
-          ls ~/Library/Logs/DiagnosticReports/ || true
-          for f in ~/Library/Logs/DiagnosticReports/autocoder*; do [ -f "$f" ] && head -60 "$f"; done
-          hdiutil detach /tmp/oldac || true
       - name: macOS 实际打开 AutoCoder.app，确认不闪退、能退出
         if: runner.os == 'macOS'
         run: |
