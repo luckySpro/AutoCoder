@@ -41,7 +41,7 @@ make desktop        # 桌面版（带菜单栏图标）：bin/autocoder-desktop�
 - **桌面版**：双击打开后自动打开浏览器，菜单栏出现图标。关掉浏览器后 AutoCoder 仍在后台运行、照常派发；点图标可以看运行中的任务、等你处理的事和今天的用量，暂停派发或退出。日志在 `~/.autocoder/autocoder.log`。
 - **命令行版**：不带图标，任何平台都能交叉编译，适合服务器或习惯用终端的情况，Ctrl+C 退出。
 
-推送 `v*` 标签时，GitHub Actions 会构建全部产物并发布：命令行版 6 个平台、Linux 和 Windows 桌面版、macOS 的 `AutoCoder.app`（Intel 与 Apple 芯片通用）。
+推送 `v*` 标签，或在 Actions 页面手动运行 Release 并填版本号，GitHub Actions 会构建全部产物并发布：命令行版 6 个平台、Linux 和 Windows 桌面版、macOS 的 `AutoCoder.app`（Intel 与 Apple 芯片通用）。
 
 前端开发：
 
