@@ -29,7 +29,7 @@ tools:
     auto_args: ["--permission-mode", "acceptEdits"]
     stream_args: ["--output-format", "stream-json", "--verbose"]
     readonly_args: ["--permission-mode", "plan"]
-    auth_errors: ["not logged in", "please run /login", "invalid api key"]
+    auth_errors: ["not logged in", "please run /login", "invalid api key", "failed to authenticate", "oauth session expired", "oauth token has expired", "authentication_error"]
     limit_errors: ["usage limit", "rate limit", "429"]
     capability: 95
     strengths: [architecture, coding, review, testing]
