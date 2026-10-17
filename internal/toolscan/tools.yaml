@@ -41,7 +41,7 @@ tools:
     version_args: ["--version"]
     headless: ["exec", "{prompt}"]
     usage_args: ["--json"]
-    auto_args: ["--full-auto"]
+    auto_args: ["--sandbox", "workspace-write"]
     readonly_args: ["--sandbox", "read-only"]
     auth_errors: ["not logged in", "please login", "401 unauthorized"]
     limit_errors: ["rate limit", "usage limit", "429"]
