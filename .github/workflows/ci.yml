@@ -26,19 +26,91 @@ jobs:
       - name: Go 检查与测试
         run: |
           go vet ./...
-          go vet -tags tray ./...
+          GOOS=windows go vet ./...
           go test -race ./...
-      - name: 桌面版能在 Linux 和 Windows 上编译
-        run: |
-          CGO_ENABLED=0 go build -tags tray -o /dev/null ./cmd/autocoder
-          CGO_ENABLED=0 GOOS=windows go build -tags tray -o /dev/null ./cmd/autocoder
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
 
-  desktop-macos:
-    runs-on: macos-14
+  # 桌面外壳（Rust + Tauri 2）：检查、在各系统上封装；macOS 上实际打开一次
+  desktop:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin, goos: darwin, goarch: arm64, bundles: 'app,dmg' }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, goos: windows, goarch: amd64, bundles: 'nsis,msi' }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, goos: linux, goarch: amd64, bundles: 'deb' }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: 桌面版在 macOS 上编译（需要 CGO）
-        run: CGO_ENABLED=1 go build -tags tray -o /dev/null ./cmd/autocoder
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy, rustfmt
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: ${{ matrix.target }}
+      - name: Linux 系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - name: 内置引擎
+        run: |
+          node scripts/sync-web.mjs
+          ext=; [ ${{ matrix.goos }} = windows ] && ext=.exe
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -trimpath -ldflags "-X main.version=ci" \
+            -o desktop/src-tauri/binaries/autocoder-engine-${{ matrix.target }}$ext ./cmd/autocoder
+      - name: Rust 格式与 Clippy
+        working-directory: desktop/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --target ${{ matrix.target }} -- -D warnings
+      - name: 封装
+        working-directory: desktop
+        run: |
+          npm ci
+          npx tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config '{"version":"0.0.0"}'
+      - name: macOS 实际打开 AutoCoder.app，确认不闪退、能退出
+        if: runner.os == 'macOS'
+        run: |
+          app=desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/AutoCoder.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          open "$app"
+          for i in $(seq 1 60); do curl -sf 127.0.0.1:7788/api/version && break; sleep 1; done
+          echo
+          sleep 15
+          pgrep -fl autocoder-desktop
+          pgrep -fl autocoder-engine
+          curl -sf 127.0.0.1:7788/api/version | grep -q '"desktop":true'
+          mkdir -p shots && screencapture -x shots/macos.png || true
+          osascript -e 'tell application "AutoCoder" to quit'
+          for i in $(seq 1 30); do pgrep -f autocoder-engine >/dev/null || break; sleep 1; done
+          if pgrep -fl autocoder-; then echo "退出后还有进程残留"; exit 1; fi
+          tail -5 ~/.autocoder/autocoder.log
+          ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i autocoder && exit 1 || true
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'macOS'
+        with:
+          name: macos-screenshot
+          path: shots/
+          if-no-files-found: ignore

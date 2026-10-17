@@ -2,3 +2,6 @@
 /dist/
 internal/server/dist/*
 !internal/server/dist/.keep
+/desktop/node_modules/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/

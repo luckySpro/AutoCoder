@@ -1,8 +1,7 @@
 // autocoder：单机多开发工具协同助手。
 //
-//	autocoder            启动本地界面（默认 127.0.0.1:7788）；桌面版同时在菜单栏显示图标，
-//	                     关掉浏览器后仍在后台运行，从菜单栏退出
-//	autocoder serve      同上
+//	autocoder            启动本地界面（默认 127.0.0.1:7788），在前台运行到 Ctrl+C
+//	autocoder serve      同上；--desktop 由桌面外壳（desktop/，Rust + Tauri）启动时使用
 //	autocoder tools      检测本机已安装的开发工具并输出默认角色分配
 //	autocoder version    输出版本
 package main
@@ -21,7 +20,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -38,11 +36,16 @@ import (
 
 var version = "dev"
 
+// desktop 为 true 时由桌面外壳（desktop/src-tauri）作为内置引擎启动。
+var desktop bool
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7788", "监听地址（默认仅本机）")
 	manifest := flag.String("tools", toolscan.DefaultUserManifestPath(), "用户工具清单路径")
-	open := flag.Bool("open", desktop, "启动后在浏览器中打开界面（桌面版默认打开）")
+	open := flag.Bool("open", false, "启动后在浏览器中打开界面")
+	desktopMode := flag.Bool("desktop", false, "由桌面外壳启动：日志写文件、读取登录 shell 的 PATH、外壳关闭标准输入时退出")
 	flag.Parse()
+	desktop = *desktopMode
 
 	switch flag.Arg(0) {
 	case "version":
@@ -57,10 +60,13 @@ func main() {
 	}
 }
 
-// serve 启动服务和调度；桌面版在菜单栏显示图标，命令行版在前台运行到 Ctrl+C。
+// serve 启动服务和调度。命令行版在前台运行到 Ctrl+C；
+// 桌面版由外壳管理：外壳退出（标准输入关闭）或调用 /api/desktop/quit 时收尾退出。
 func serve(addr, manifest string, openUI bool) {
 	home := filepath.Join(userHome(), ".autocoder")
 	if desktop {
+		// 外壳退出后标准错误的管道会断，写日志不能因此直接结束进程（来不及收尾）
+		signal.Ignore(syscall.SIGPIPE)
 		logToFile(home)
 		loginPath()
 	}
@@ -104,7 +110,19 @@ func serve(addr, manifest string, openUI bool) {
 	}
 	log.Printf("检测到 %d 个开发工具，清单：%s", n, manifest)
 
-	hs := &http.Server{Handler: srv.Handler()}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	quit := func() {
+		select {
+		case sig <- syscall.SIGTERM:
+		default: // 已经在退出
+		}
+	}
+	handler := srv.Handler()
+	if desktop {
+		handler = desktopHandler(srv, base, handler, quit)
+	}
+	hs := &http.Server{Handler: handler}
 	go func() {
 		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
@@ -115,25 +133,20 @@ func serve(addr, manifest string, openUI bool) {
 		_ = tray.OpenURL(base + "/")
 	}
 
-	var once sync.Once
-	stop := func() {
-		once.Do(func() {
-			log.Printf("正在退出：停止派发，正在运行的任务保存进度后放回队列")
-			srv.Engine.Shutdown(20 * time.Second)
-			sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			_ = hs.Shutdown(sctx)
-			log.Printf("已退出")
-		})
+	if desktop {
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin) // 外壳退出或崩溃时标准输入关闭
+			log.Printf("桌面外壳已关闭")
+			quit()
+		}()
 	}
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sig
-		stop()
-		os.Exit(0)
-	}()
-	runUI(srv, base, stop)
+	<-sig
+	log.Printf("正在退出：停止派发，正在运行的任务保存进度后放回队列")
+	srv.Engine.Shutdown(20 * time.Second)
+	sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = hs.Shutdown(sctx)
+	log.Printf("已退出")
 }
 
 // running 判断地址上是否已经是 AutoCoder。

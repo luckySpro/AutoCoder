@@ -35,8 +35,8 @@ jobs:
           name: web-dist
           path: web/dist
 
-  # 命令行版（无图标，纯 Go）全平台交叉编译；Linux、Windows 桌面版也不需要 CGO，一起编
-  cross:
+  # 命令行版单文件（纯 Go）全平台交叉编译；同一个文件也是桌面版里的内置引擎
+  cli:
     needs: web
     runs-on: ubuntu-latest
     steps:
@@ -58,73 +58,87 @@ jobs:
             CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
               -o out/autocoder-cli-$os-$arch$ext ./cmd/autocoder
           done
-          for t in linux/amd64 linux/arm64; do
-            os=${t%/*}; arch=${t#*/}
-            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -tags tray -trimpath -ldflags "-s -w -X main.version=$VERSION" \
-              -o out/autocoder-desktop-$os-$arch ./cmd/autocoder
-          done
-          for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=windows GOARCH=$arch go build -tags tray -trimpath -ldflags "-s -w -X main.version=$VERSION" \
-              -o out/autocoder-desktop-windows-$arch.exe ./cmd/autocoder
-          done
-          cd out && sha256sum * > SHA256SUMS-cross.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: cross
+          name: cli
           path: out/*
 
-  # macOS 菜单栏图标要用系统接口（CGO），只能在 macOS 上编译
-  macos:
-    needs: web
-    runs-on: macos-14
+  # 桌面版：Rust + Tauri 2 外壳，内置上面的 Go 引擎；在各自的系统上构建和封装
+  desktop:
+    needs: cli
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-14, target: aarch64-apple-darwin, engine: darwin-arm64, bundles: 'app,dmg' }
+          - { name: macos-x64, os: macos-14, target: x86_64-apple-darwin, engine: darwin-amd64, bundles: 'app,dmg' }
+          - { name: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, engine: windows-amd64.exe, bundles: 'nsis,msi' }
+          - { name: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, engine: linux-amd64, bundles: 'appimage,deb' }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-node@v4
         with:
-          go-version-file: go.mod
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: ${{ matrix.target }}
+      - name: Linux 系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf
       - uses: actions/download-artifact@v4
         with:
-          name: web-dist
-          path: web/dist
-      - name: 构建 AutoCoder.app 和 dmg（Intel 和 Apple 芯片通用）
+          name: cli
+          path: cli
+      - name: 放入内置引擎
         run: |
-          node scripts/sync-web.mjs
-          case "$VERSION" in v*) ;; *) VERSION=$(git rev-parse --short HEAD);; esac
-          for arch in amd64 arm64; do
-            CGO_ENABLED=1 GOOS=darwin GOARCH=$arch go build -tags tray -trimpath -ldflags "-s -w -X main.version=$VERSION" \
-              -o build/autocoder-$arch ./cmd/autocoder
-          done
-          lipo -create -output build/autocoder build/autocoder-amd64 build/autocoder-arm64
+          ext=; case "${{ matrix.target }}" in *windows*) ext=.exe;; esac
+          cp cli/autocoder-cli-${{ matrix.engine }} desktop/src-tauri/binaries/autocoder-engine-${{ matrix.target }}$ext
+          chmod +x desktop/src-tauri/binaries/*
+      - name: 构建安装包
+        run: |
+          case "$VERSION" in v*) ver=${VERSION#v};; *) ver=0.0.0;; esac
+          cd desktop
+          npm ci
+          npx tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config "{\"version\":\"$ver\"}"
+      - name: 收集产物
+        run: |
+          b=desktop/src-tauri/target/${{ matrix.target }}/release/bundle
           mkdir -p out
-          scripts/macapp.sh build/autocoder "$VERSION" build
-          # 没有开发者证书：做一次临时签名，首次打开需要右键「打开」
-          codesign --force --deep -s - build/AutoCoder.app
-          ditto -c -k --keepParent build/AutoCoder.app out/AutoCoder-macos-universal.zip
-          # 安装用的 dmg：打开后把 AutoCoder 拖进「应用程序」
-          mkdir -p build/dmg
-          cp -R build/AutoCoder.app build/dmg/
-          ln -s /Applications build/dmg/Applications
-          hdiutil create -volname "AutoCoder" -srcfolder build/dmg -ov -format UDZO out/AutoCoder-macos-universal.dmg
-          cd out && shasum -a 256 * > SHA256SUMS-macos.txt
+          find $b -maxdepth 2 \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.AppImage' -o -name '*.deb' \) -type f -exec cp {} out/ \;
+          ls -l out
+          test -n "$(ls out)"
       - uses: actions/upload-artifact@v4
         with:
-          name: macos
+          name: desktop-${{ matrix.name }}
           path: out/*
 
   release:
     if: startsWith(github.event.inputs.version || github.ref_name, 'v')
-    needs: [cross, macos]
+    needs: [cli, desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '{cross,macos}'
+          pattern: '{cli,desktop-*}'
           path: out
           merge-multiple: true
       - name: 发布
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          (cd out && sha256sum * > SHA256SUMS.txt)
           files=$(find out -maxdepth 1 -type f | sort)
           # 重跑时发布已存在：只补传并覆盖产物
           if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

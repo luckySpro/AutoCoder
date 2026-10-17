@@ -12,10 +12,10 @@ import (
 // IconState 决定图标的样子：三个（或更多）运行槽，忙的实心、空的描边；
 // 有事等你处理时右上角加一个圆点；暂停时整体变淡。
 type IconState struct {
-	Slots   int
-	Busy    int
-	Waiting bool
-	Paused  bool
+	Slots   int  `json:"slots"`
+	Busy    int  `json:"busy"`
+	Waiting bool `json:"waiting"`
+	Paused  bool `json:"paused"`
 }
 
 var (

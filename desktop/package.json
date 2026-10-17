@@ -1,0 +1,12 @@
+{
+  "name": "autocoder-desktop",
+  "private": true,
+  "description": "AutoCoder 桌面外壳（Rust + Tauri 2），内置 Go 引擎",
+  "author": "M&J Group <473276@qq.com>",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.1"
+  }
+}
