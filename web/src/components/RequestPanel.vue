@@ -142,6 +142,7 @@ function layers(plan: Plan) {
         <div class="layers" role="list" :aria-label="`${r.id} 的任务`">
           <div v-for="(layer, i) in layers(r.plan)" :key="i" class="layer">
             <span class="step mono">{{ i === 0 ? '先' : `第 ${i + 1} 步` }}</span>
+            <div class="cards">
             <div v-for="t in layer" :key="t.id" class="pt" role="listitem">
               <div class="row between">
                 <span><b class="mono">{{ t.id }}</b> {{ t.title }}</span>
@@ -159,6 +160,7 @@ function layers(plan: Plan) {
                 <ul v-if="t.verify?.length" class="small mono"><li v-for="v in t.verify" :key="v">{{ v }}</li></ul>
                 <p v-else-if="t.manual" class="small faint">人工验收</p>
               </details>
+            </div>
             </div>
           </div>
         </div>
@@ -222,9 +224,10 @@ function layers(plan: Plan) {
 .qa ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-weight: 600; }
 .plan { display: grid; gap: 12px; }
 .layers { display: grid; gap: 10px; }
-.layer { display: grid; grid-template-columns: 56px repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; align-items: start; }
+.layer { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 8px; min-width: 0; }
 .step { font-size: 11px; color: var(--ink-3); padding-top: 10px; letter-spacing: 0.04em; }
-.pt { display: grid; gap: 6px; padding: 10px 10px 10px 12px; border: 1px solid var(--line); background: var(--sunken); border-radius: var(--r); min-width: 0; }
+.pt { display: grid; gap: 6px; align-content: start; overflow-wrap: anywhere; padding: 10px 10px 10px 12px; border: 1px solid var(--line); background: var(--sunken); border-radius: var(--r); min-width: 0; }
 .pt b { color: var(--accent); font-size: 12px; }
 .pt details ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; }
 .pt summary, .summary summary { cursor: pointer; color: var(--ink-2); }

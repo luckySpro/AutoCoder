@@ -116,3 +116,24 @@ func TestArgs(t *testing.T) {
 		}
 	}
 }
+
+// Claude Code 登录过期时的真实输出要被识别成"等登录"，而不是普通失败。
+func TestClaudeAuthErrors(t *testing.T) {
+	m, err := LoadManifest("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := strings.ToLower("Failed to authenticate: OAuth session expired and could not be refreshed")
+	for _, tool := range m.Tools {
+		if tool.ID != "claude-code" {
+			continue
+		}
+		for _, k := range tool.AuthErrors {
+			if strings.Contains(msg, strings.ToLower(k)) {
+				return
+			}
+		}
+		t.Fatalf("claude-code 的 auth_errors 识别不了：%s", msg)
+	}
+	t.Fatal("缺少 claude-code")
+}
