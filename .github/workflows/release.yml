@@ -86,7 +86,7 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      - name: 构建 AutoCoder.app（Intel 和 Apple 芯片通用）
+      - name: 构建 AutoCoder.app 和 dmg（Intel 和 Apple 芯片通用）
         run: |
           node scripts/sync-web.mjs
           case "$VERSION" in v*) ;; *) VERSION=$(git rev-parse --short HEAD);; esac
@@ -100,6 +100,11 @@ jobs:
           # 没有开发者证书：做一次临时签名，首次打开需要右键「打开」
           codesign --force --deep -s - build/AutoCoder.app
           ditto -c -k --keepParent build/AutoCoder.app out/AutoCoder-macos-universal.zip
+          # 安装用的 dmg：打开后把 AutoCoder 拖进「应用程序」
+          mkdir -p build/dmg
+          cp -R build/AutoCoder.app build/dmg/
+          ln -s /Applications build/dmg/Applications
+          hdiutil create -volname "AutoCoder" -srcfolder build/dmg -ov -format UDZO out/AutoCoder-macos-universal.dmg
           cd out && shasum -a 256 * > SHA256SUMS-macos.txt
       - uses: actions/upload-artifact@v4
         with:
