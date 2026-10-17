@@ -113,9 +113,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: '{cross,macos}'
           path: out
           merge-multiple: true
       - name: 发布
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$VERSION" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AutoCoder $VERSION" --generate-notes
+        run: |
+          files=$(find out -maxdepth 1 -type f | sort)
+          # 重跑时发布已存在：只补传并覆盖产物
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$VERSION" $files --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$VERSION" $files --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "AutoCoder $VERSION" --generate-notes
+          fi
