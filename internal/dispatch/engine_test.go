@@ -28,6 +28,7 @@ case "$FAKE_MODE" in
   crash) echo "boom" >&2; exit 3;;
   auth)  echo "Error: not logged in" >&2; exit 1;;
   scope) echo "x" > outside.txt;;
+  slow)  echo "{\"type\":\"system\",\"subtype\":\"init\"}"; sleep 30;;
 esac
 echo '{"type":"system","subtype":"init","model":"fake-1"}'
 echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"开始写 hello"},{"type":"tool_use","name":"Write","input":{"file_path":"src/hello.txt"}}],"usage":{"input_tokens":100,"output_tokens":20}}}'

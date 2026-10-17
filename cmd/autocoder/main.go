@@ -1,20 +1,30 @@
 // autocoder：单机多开发工具协同助手。
 //
-//	autocoder            启动本地界面（默认 127.0.0.1:7788）
+//	autocoder            启动本地界面（默认 127.0.0.1:7788）；桌面版同时在菜单栏显示图标，
+//	                     关掉浏览器后仍在后台运行，从菜单栏退出
+//	autocoder serve      同上
 //	autocoder tools      检测本机已安装的开发工具并输出默认角色分配
 //	autocoder version    输出版本
 package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/luckySpro/AutoCoder/internal/dispatch"
 	"github.com/luckySpro/AutoCoder/internal/gitinfo"
@@ -23,6 +33,7 @@ import (
 	"github.com/luckySpro/AutoCoder/internal/server"
 	"github.com/luckySpro/AutoCoder/internal/settings"
 	"github.com/luckySpro/AutoCoder/internal/toolscan"
+	"github.com/luckySpro/AutoCoder/internal/tray"
 )
 
 var version = "dev"
@@ -30,6 +41,7 @@ var version = "dev"
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7788", "监听地址（默认仅本机）")
 	manifest := flag.String("tools", toolscan.DefaultUserManifestPath(), "用户工具清单路径")
+	open := flag.Bool("open", desktop, "启动后在浏览器中打开界面（桌面版默认打开）")
 	flag.Parse()
 
 	switch flag.Arg(0) {
@@ -38,37 +50,128 @@ func main() {
 	case "tools":
 		printTools(*manifest)
 	case "", "serve":
-		ctx := context.Background()
-		home := filepath.Join(userHome(), ".autocoder")
-		store, loadErrs := project.Open(ctx, home)
-		srv := &server.Server{ManifestPath: *manifest, Scanner: toolscan.NewScanner(), Git: gitinfo.New(), Version: version,
-			Projects: store, Settings: &settings.File{Path: filepath.Join(home, "settings.json")}}
-		for _, e := range loadErrs {
-			log.Printf("加载项目失败：%v", e)
-			srv.LoadErrors = append(srv.LoadErrors, e.Error())
-		}
-		srv.Engine = &dispatch.Engine{Store: store, Settings: srv.Settings, LogDir: filepath.Join(home, "logs"),
-			Tools: func(ctx context.Context) []toolscan.Detection { t, _, _ := srv.Scan(ctx, false); return t }}
-		// 启动即检测一次，结果缓存给界面使用。
-		tools, _, err := srv.Scan(ctx, true)
-		if err != nil {
-			log.Fatal(err)
-		}
-		srv.Engine.Start(ctx)
-		log.Printf("已加载 %d 个项目", len(store.Projects()))
-		n := 0
-		for _, t := range tools {
-			if t.Installed {
-				n++
-			}
-		}
-		log.Printf("检测到 %d 个开发工具，清单：%s", n, *manifest)
-		log.Printf("AutoCoder 已启动：http://%s", *addr)
-		log.Fatal(http.ListenAndServe(*addr, srv.Handler()))
+		serve(*addr, *manifest, *open)
 	default:
 		fmt.Fprintf(os.Stderr, "未知命令 %q\n", flag.Arg(0))
 		os.Exit(2)
 	}
+}
+
+// serve 启动服务和调度；桌面版在菜单栏显示图标，命令行版在前台运行到 Ctrl+C。
+func serve(addr, manifest string, openUI bool) {
+	home := filepath.Join(userHome(), ".autocoder")
+	if desktop {
+		logToFile(home)
+		loginPath()
+	}
+	base := "http://" + addr
+
+	// 单实例：端口上已经是 AutoCoder，就直接打开它的界面
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		if running(base) {
+			log.Printf("AutoCoder 已在运行：%s", base)
+			if openUI {
+				_ = tray.OpenURL(base + "/")
+			}
+			return
+		}
+		log.Fatalf("无法监听 %s：%v", addr, err)
+	}
+
+	ctx := context.Background()
+	store, loadErrs := project.Open(ctx, home)
+	srv := &server.Server{ManifestPath: manifest, Scanner: toolscan.NewScanner(), Git: gitinfo.New(), Version: version, Desktop: desktop,
+		Projects: store, Settings: &settings.File{Path: filepath.Join(home, "settings.json")}}
+	for _, e := range loadErrs {
+		log.Printf("加载项目失败：%v", e)
+		srv.LoadErrors = append(srv.LoadErrors, e.Error())
+	}
+	srv.Engine = &dispatch.Engine{Store: store, Settings: srv.Settings, LogDir: filepath.Join(home, "logs"),
+		Tools: func(ctx context.Context) []toolscan.Detection { t, _, _ := srv.Scan(ctx, false); return t }}
+	// 启动即检测一次，结果缓存给界面使用。
+	tools, _, err := srv.Scan(ctx, true)
+	if err != nil {
+		log.Fatal(err)
+	}
+	srv.Engine.Start(ctx)
+	log.Printf("已加载 %d 个项目", len(store.Projects()))
+	n := 0
+	for _, t := range tools {
+		if t.Installed {
+			n++
+		}
+	}
+	log.Printf("检测到 %d 个开发工具，清单：%s", n, manifest)
+
+	hs := &http.Server{Handler: srv.Handler()}
+	go func() {
+		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	}()
+	log.Printf("AutoCoder 已启动：%s", base)
+	if openUI {
+		_ = tray.OpenURL(base + "/")
+	}
+
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			log.Printf("正在退出：停止派发，正在运行的任务保存进度后放回队列")
+			srv.Engine.Shutdown(20 * time.Second)
+			sctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = hs.Shutdown(sctx)
+			log.Printf("已退出")
+		})
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		stop()
+		os.Exit(0)
+	}()
+	runUI(srv, base, stop)
+}
+
+// running 判断地址上是否已经是 AutoCoder。
+func running(base string) bool {
+	c := http.Client{Timeout: 2 * time.Second}
+	resp, err := c.Get(base + "/api/version")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var v struct {
+		Name string `json:"name"`
+	}
+	return json.NewDecoder(resp.Body).Decode(&v) == nil && v.Name == "autocoder"
+}
+
+// logToFile 让桌面版（没有终端窗口）把日志写到 ~/.autocoder/autocoder.log。
+func logToFile(home string) {
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return
+	}
+	path := filepath.Join(home, "autocoder.log")
+	if fi, err := os.Stat(path); err == nil && fi.Size() > 10<<20 {
+		_ = os.Rename(path, path+".1") // 超过 10MB 轮换一次
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	log.SetOutput(teeWriter{f, os.Stderr})
+}
+
+// teeWriter 同时写文件和终端；没有终端时（Windows 图形程序）忽略终端的错误。
+type teeWriter struct{ file, term io.Writer }
+
+func (t teeWriter) Write(p []byte) (int, error) {
+	_, _ = t.term.Write(p)
+	return t.file.Write(p)
 }
 
 func userHome() string {

@@ -160,7 +160,7 @@ async function save() {
         <div class="panel set">
           <div>
             <h2>暂停派发</h2>
-            <p class="muted small">不再启动新任务，正在运行的会跑完。</p>
+            <p class="muted small">不再启动新任务，正在运行的会跑完。<template v-if="store.desktop">菜单栏图标里也能切换。</template></p>
           </div>
           <label class="switch big">
             <input type="checkbox" v-model="store.settings.paused" aria-label="暂停派发" @change="saved = false" />
@@ -168,6 +168,7 @@ async function save() {
           </label>
         </div>
       </div>
+      <p v-if="store.desktop" class="muted small">关掉浏览器后 AutoCoder 仍在后台运行，任务照常派发。点菜单栏图标查看运行状态、等你处理的事和今天的用量，或者退出。</p>
       <p v-if="saveError" class="error" role="alert">{{ saveError }}</p>
     </template>
   </section>
@@ -186,7 +187,7 @@ async function save() {
 .score .num { font: 700 44px/1 var(--font-mono); color: var(--ink); letter-spacing: -0.04em; }
 .score small { color: var(--ink-3); font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.08em; }
 .matrix th:not(:first-child), .cell { text-align: center; }
-.rules { flex-direction: column; align-items: stretch; }
+.set.rules { flex-direction: column; align-items: stretch; justify-content: flex-start; }
 .nums { display: flex; gap: 14px; flex-wrap: wrap; }
 .nums label { display: grid; grid-template-columns: auto 64px auto; align-items: center; gap: 8px; font-size: 13px; }
 .nums span { color: var(--ink-3); }

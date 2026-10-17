@@ -48,6 +48,7 @@ func (s *Server) projectRoutes(mux *http.ServeMux) {
 	})
 
 	mux.HandleFunc("GET /api/usage", s.listUsage)
+	mux.HandleFunc("GET /api/status", s.getStatus)
 }
 
 func decode(r *http.Request, v any) error {

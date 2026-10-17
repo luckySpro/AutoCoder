@@ -34,6 +34,7 @@ type Server struct {
 	Scanner      *toolscan.Scanner
 	Git          *gitinfo.Client
 	Version      string
+	Desktop      bool // 桌面版：有菜单栏图标，关掉浏览器也在后台运行
 	// 以下三项为空时只提供工具清单相关接口（测试中使用）。
 	Projects   *project.Store
 	Engine     *dispatch.Engine
@@ -65,7 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"version": s.Version})
+		writeJSON(w, http.StatusOK, map[string]any{"name": "autocoder", "version": s.Version, "desktop": s.Desktop})
 	})
 
 	// 工具清单：查询、在界面内增删改、恢复默认、导入导出

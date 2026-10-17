@@ -63,6 +63,7 @@ export const store = reactive({
   runStats: [] as RunStat[], // 真实服务：每个任务最近一次尝试
   toolState: {} as Record<string, string>, // 工具冷却 / 等待登录
   loadErrors: [] as string[],
+  desktop: false, // 桌面版：菜单栏有图标，关掉浏览器也在后台运行
   settings: loadJSON<Settings>(SETTINGS_KEY) ?? { ...DEFAULT_SETTINGS },
 })
 
@@ -195,6 +196,7 @@ export async function resetAssignments() {
 // ---------- 项目、任务、运行、计量（真实服务）----------
 
 let realLoaded = false
+let serverPaused: boolean | undefined
 let pollTimer: number | undefined
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -212,11 +214,18 @@ type ProjectsResp = { projects: (Project & { reports: Report[] })[]; errors?: st
 
 export async function refresh() {
   if (store.demo) return
-  const [p, r, u] = await Promise.all([
+  const [p, r, u, st] = await Promise.all([
     call<ProjectsResp>('GET', '/api/projects'),
     call<{ runs: RunStat[]; tools: Record<string, string> }>('GET', '/api/runs'),
     call<{ records: UsageRecord[] }>('GET', '/api/usage'),
+    call<Settings>('GET', '/api/settings'),
   ])
+  if (!realLoaded) {
+    call<{ desktop?: boolean }>('GET', '/api/version').then((v) => (store.desktop = !!v.desktop)).catch(() => {})
+  }
+  // 暂停可以在菜单栏里切换：服务端的值变了才跟上，不覆盖界面上还没保存的改动
+  if (serverPaused !== undefined && st.paused !== serverPaused) store.settings.paused = st.paused
+  serverPaused = st.paused
   store.projects = p.projects.map((x) => ({
     ...x,
     updatedAt: fmtAt(x.updatedAt),

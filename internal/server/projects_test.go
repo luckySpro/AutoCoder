@@ -139,6 +139,16 @@ func TestProjectFlowOverHTTP(t *testing.T) {
 	if len(usage.Records) != 1 || usage.Records[0].Usage.Total() != 57 {
 		t.Fatalf("%+v", usage)
 	}
+
+	// 菜单栏状态：今天的用量按工具汇总，空闲时没有在跑的
+	var sum Summary
+	json.Unmarshal(do(h, "GET", "/api/status", "", nil).Body.Bytes(), &sum)
+	if sum.TodayTokens != 57 || sum.TodayCalls != 1 || len(sum.TodayByTool) != 1 || sum.TodayByTool[0].Name != "Fake" || len(sum.Running) != 0 || sum.Slots != 2 {
+		t.Fatalf("%+v", sum)
+	}
+	if err := s.SetPaused(true); err != nil || !s.Summary().Paused {
+		t.Fatal("暂停没有生效", err)
+	}
 	if rec := do(h, "GET", "/api/runs/web/T1/log?attempt=1", "", nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), "写文件") {
 		t.Fatalf("日志：%d %s", rec.Code, rec.Body)
 	}

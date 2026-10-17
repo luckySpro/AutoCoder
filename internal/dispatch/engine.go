@@ -44,6 +44,7 @@ type Engine struct {
 	coolN    map[string]int
 	authWait map[string]bool
 	wake     chan struct{}
+	closing  bool // 正在退出：不再派发新的尝试
 }
 
 func (e *Engine) init() {
@@ -124,6 +125,44 @@ func (e *Engine) Runs() []*Run {
 	return out
 }
 
+// quitReason 是 AutoCoder 退出时停止尝试的原因。
+const quitReason = "AutoCoder 退出"
+
+// Shutdown 停止派发并结束正在运行的尝试：已有改动会作为 WIP 提交保留，
+// 任务放回队列，下次启动继续。最多等 timeout。
+func (e *Engine) Shutdown(timeout time.Duration) {
+	e.mu.Lock()
+	e.init()
+	e.closing = true
+	runs := make([]*Run, 0, len(e.runs))
+	for _, r := range e.runs {
+		runs = append(runs, r)
+	}
+	e.mu.Unlock()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		busy := false
+		for _, r := range runs {
+			if r.Active() {
+				busy = true
+				r.Stop(quitReason) // 进程可能还没起来，每轮都补一次
+			}
+		}
+		if !busy {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// 状态提交是后台进行的，拿一次锁等它们写完
+	e.Store.Lock()
+	ps := e.Store.Projects()
+	e.Store.Unlock()
+	for _, p := range ps {
+		p.GitMu.Lock()
+		p.GitMu.Unlock() //nolint:staticcheck // 只为等待
+	}
+}
+
 // Run 返回 项目/任务 的最近一次尝试。
 func (e *Engine) Run(key string) *Run {
 	e.mu.Lock()
@@ -200,7 +239,10 @@ func (e *Engine) Schedule(ctx context.Context) {
 			}
 		}
 	}
-	if !st.Paused {
+	e.mu.Lock()
+	closing := e.closing
+	e.mu.Unlock()
+	if !st.Paused && !closing {
 		for _, p := range e.Store.Projects() {
 			if OverBudget(p) {
 				continue // 预算用完：这个项目不再派发，等你提高预算（§6.7）
@@ -1142,6 +1184,13 @@ func (e *Engine) setStatus(p *project.Project, taskID, status string) {
 }
 
 func (e *Engine) retryOrBlock(t *project.Task, st settings.Settings, reason string) {
+	if reason == quitReason {
+		// 退出打断的这次不算一次尝试，下次启动接着做
+		t.Attempts = max(0, t.Attempts-1)
+		t.LastError = "AutoCoder 退出时中断，下次启动继续"
+		t.Status = project.Ready
+		return
+	}
 	t.LastError = reason
 	if t.Attempts >= st.MaxAttempts {
 		t.Status = project.Blocked

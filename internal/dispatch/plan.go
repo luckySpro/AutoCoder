@@ -97,6 +97,12 @@ func (e *Engine) plan(ctx context.Context, p *project.Project, reqID string, too
 			return r.Error
 		})
 		return
+	case out.stopBy == quitReason:
+		e.finishPlan(p, reqID, run, tool.ID, tok, func(r *project.Request) string {
+			r.Attempts-- // 保持规划中，下次启动重新规划
+			return "AutoCoder 退出时中断，下次启动重新规划"
+		})
+		return
 	case out.stopBy == "用户停止":
 		e.finishPlan(p, reqID, run, tool.ID, tok, func(r *project.Request) string {
 			r.Status, r.Error = project.ReqFailed, "规划被停止"

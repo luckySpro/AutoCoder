@@ -58,28 +58,28 @@ type Meta struct {
 	ScopeAllow        []string  `yaml:"scope_allow,omitempty" json:"scopeAllow"`
 	CreatedAt         time.Time `yaml:"created_at" json:"createdAt"`
 	DeliveredAt       time.Time `yaml:"delivered_at,omitempty" json:"deliveredAt,omitempty"` // 最近一次交付到主分支的时间
-	TokenBudget       int64     `yaml:"token_budget,omitempty" json:"tokenBudget"`            // 项目 token 预算，0 表示不限
+	TokenBudget       int64     `yaml:"token_budget,omitempty" json:"tokenBudget"`           // 项目 token 预算，0 表示不限
 }
 
 // Task 是 .autocoder/tasks/<id>.yaml。
 type Task struct {
-	ID          string    `yaml:"id" json:"id"`
-	Title       string    `yaml:"title" json:"title"`
-	Description string    `yaml:"description,omitempty" json:"description"`
-	Kind        string    `yaml:"kind" json:"kind"` // feature | ui | test | infra
-	Role        string    `yaml:"role" json:"role"`
-	Assignee    string    `yaml:"assignee,omitempty" json:"assignee"`
-	DependsOn   []string  `yaml:"depends_on,omitempty" json:"dependsOn"`
-	Branch      string    `yaml:"branch" json:"branch"`
-	Scope       []string  `yaml:"scope,omitempty" json:"scope"`
-	Acceptance  []string  `yaml:"acceptance,omitempty" json:"acceptance"`
-	Verify      []string  `yaml:"verify,omitempty" json:"verify"`
-	Status      string    `yaml:"status" json:"status"`
-	Attempts    int       `yaml:"attempts,omitempty" json:"attempts"`
-	Commits     int       `yaml:"commits,omitempty" json:"commits"`
-	LastError   string    `yaml:"last_error,omitempty" json:"lastError,omitempty"`
-	Waiting     string    `yaml:"waiting,omitempty" json:"waiting,omitempty"` // waiting-user 时需要你处理的事
-	Request     string    `yaml:"request,omitempty" json:"request,omitempty"` // 由哪条需求的计划生成
+	ID          string   `yaml:"id" json:"id"`
+	Title       string   `yaml:"title" json:"title"`
+	Description string   `yaml:"description,omitempty" json:"description"`
+	Kind        string   `yaml:"kind" json:"kind"` // feature | ui | test | infra
+	Role        string   `yaml:"role" json:"role"`
+	Assignee    string   `yaml:"assignee,omitempty" json:"assignee"`
+	DependsOn   []string `yaml:"depends_on,omitempty" json:"dependsOn"`
+	Branch      string   `yaml:"branch" json:"branch"`
+	Scope       []string `yaml:"scope,omitempty" json:"scope"`
+	Acceptance  []string `yaml:"acceptance,omitempty" json:"acceptance"`
+	Verify      []string `yaml:"verify,omitempty" json:"verify"`
+	Status      string   `yaml:"status" json:"status"`
+	Attempts    int      `yaml:"attempts,omitempty" json:"attempts"`
+	Commits     int      `yaml:"commits,omitempty" json:"commits"`
+	LastError   string   `yaml:"last_error,omitempty" json:"lastError,omitempty"`
+	Waiting     string   `yaml:"waiting,omitempty" json:"waiting,omitempty"` // waiting-user 时需要你处理的事
+	Request     string   `yaml:"request,omitempty" json:"request,omitempty"` // 由哪条需求的计划生成
 	// ConflictFails 是连续合并冲突的次数，达到 2 次转给你（§6.6）。
 	ConflictFails int `yaml:"conflict_fails,omitempty" json:"conflictFails,omitempty"`
 	// ReviewTries 是评审结论无法解析时已重跑的次数。
@@ -754,8 +754,15 @@ func AppendUsage(p *Project, u Usage) error {
 }
 
 // ReadUsage 读取该项目的全部计量记录。
-func ReadUsage(p *Project) []Usage {
-	files, _ := filepath.Glob(filepath.Join(p.stateDir(), "usage", "*.jsonl"))
+func ReadUsage(p *Project) []Usage { return readUsage(p, "*") }
+
+// ReadUsageOn 只读某一天（本地日期）的计量记录。
+func ReadUsageOn(p *Project, day time.Time) []Usage {
+	return readUsage(p, day.Format("2006-01-02"))
+}
+
+func readUsage(p *Project, name string) []Usage {
+	files, _ := filepath.Glob(filepath.Join(p.stateDir(), "usage", name+".jsonl"))
 	sort.Strings(files)
 	var out []Usage
 	for _, path := range files {

@@ -152,6 +152,9 @@ func (e *Engine) review(ctx context.Context, p *project.Project, taskID string, 
 		until := e.cool(tool.ID, false)
 		e.reviewDone(p, taskID, run, "failed", report, fmt.Sprintf("%s 被限流，冷却到 %s 后再评审", tool.Name, until.Format("15:04")), func(t *project.Task) {})
 		return
+	case out.stopBy == quitReason:
+		e.reviewDone(p, taskID, run, "stopped", report, "AutoCoder 退出时中断，下次启动重新评审", func(t *project.Task) {})
+		return
 	case out.stopBy == "用户停止":
 		e.reviewDone(p, taskID, run, "stopped", report, "评审被停止", func(t *project.Task) { t.Status = project.Cancelled })
 		return
