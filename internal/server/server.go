@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +135,7 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"manifestPath": s.ManifestPath,
+		"searchPath":   filepath.SplitList(os.Getenv("PATH")), // 按这些目录查找工具命令
 		"scannedAt":    at,
 		"strengths":    toolscan.Strengths,
 		"tools":        tools,

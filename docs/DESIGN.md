@@ -451,7 +451,7 @@ AutoCoder 只写 `ac/*` 分支和交付时的那一次主分支合并，从不�
 | 启动 | 终端里运行，Ctrl+C 退出 | 双击打开，自己的窗口里显示界面；菜单栏（Windows 任务栏通知区、Linux 状态栏）出现图标 |
 | 关掉界面 | 关浏览器，服务继续运行（终端还开着时） | 关窗口只是隐藏，派发在后台继续；macOS 上窗口藏起来后 Dock 图标也收起，只留菜单栏图标 |
 | 日志 | 终端 | `~/.autocoder/autocoder.log`（超过 10 MB 轮换一次） |
-| PATH | 继承终端 | 从访达或桌面菜单打开时只有系统默认 PATH，引擎启动时读一次登录 shell 的 PATH 合并进来，才能找到 Homebrew、npm、nvm 装的工具 |
+| PATH | 继承终端 | 从访达或桌面菜单打开时只有系统默认 PATH。引擎启动时读一次登录 shell 的 PATH（先交互式，读得到 .zshrc 里的 nvm 等；不行再非交互式），再补上 Homebrew、nvm、volta、pnpm、bun 等常见目录和 `npm prefix -g` 的 bin，日志里记下最终的 PATH；工具清单页"未安装"下面能看到这些目录 |
 | 产物 | 6 个平台的单文件，`CGO_ENABLED=0` 交叉编译 | macOS（Apple 芯片、Intel 各一个 dmg）、Windows（安装程序 exe 和 msi）、Linux（AppImage 和 deb），各在自己的系统上封装 |
 
 外壳和引擎的分工：
