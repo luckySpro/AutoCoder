@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { importTools, removeTool, saveTool, scanTools, specOf, store, strengthName } from '../api'
+import { fmtTokens, importTools, removeTool, saveTool, scanTools, specOf, store, strengthName, todayKey, totalTokens } from '../api'
 import AgentMark from '../components/AgentMark.vue'
 import Icon from '../components/Icon.vue'
 import ToolEditor from '../components/ToolEditor.vue'
@@ -58,6 +58,21 @@ async function readFile(e: Event) {
   if (file) importText.value = await file.text()
 }
 
+// 每个工具的用量：今天、累计、调用次数，以及正在做什么
+const usageOf = computed(() => {
+  const m = new Map<string, { today: number; total: number; calls: number }>()
+  for (const u of store.usage) {
+    const x = m.get(u.tool) ?? { today: 0, total: 0, calls: 0 }
+    const n = totalTokens(u.usage)
+    x.total += n
+    x.calls++
+    if (u.at.startsWith(todayKey())) x.today += n
+    m.set(u.tool, x)
+  }
+  return m
+})
+const nowDoing = (id: string) => store.running.filter((r) => r.tool === id).map((r) => `${r.projectId} / ${r.taskId}`).join('、')
+
 const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定义' }
 </script>
 
@@ -98,6 +113,15 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
               <span v-else class="pill warn" title="不输出 token 用量，按字符数估算">估算用量</span>
               <span v-if="!t.headless?.length" class="pill bad">缺少调用参数</span>
             </div>
+          </div>
+          <div class="use" :aria-label="`${t.name} 的用量`">
+            <span v-if="!usageOf.get(t.id)?.calls && !nowDoing(t.id) && !store.toolState[t.id]" class="faint small">还没用过</span>
+            <template v-else>
+            <div><span class="faint">今天</span><b class="num">{{ fmtTokens(usageOf.get(t.id)?.today ?? 0) }}</b></div>
+            <div><span class="faint">累计</span><b class="num">{{ fmtTokens(usageOf.get(t.id)?.total ?? 0) }}</b><span class="faint num">{{ usageOf.get(t.id)?.calls ?? 0 }} 次</span></div>
+            <div v-if="nowDoing(t.id)" class="doing"><i class="live" aria-hidden="true"></i>{{ nowDoing(t.id) }}</div>
+            <div v-else-if="store.toolState[t.id]" class="doing warn">{{ store.toolState[t.id] }}</div>
+            </template>
           </div>
           <div class="state">
             <template v-if="t.installed">
@@ -152,7 +176,7 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
 .rows { display: grid; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
 .rows:empty { display: none; }
 .tool {
-  display: grid; grid-template-columns: auto minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 18px; align-items: center;
+  display: grid; grid-template-columns: auto minmax(0, 1.4fr) minmax(150px, 0.7fr) minmax(0, 1fr) auto; gap: 18px; align-items: center;
   padding: 16px 18px; border-top: 1px solid var(--line);
 }
 .tool:first-child { border-top: 0; }
@@ -165,6 +189,12 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
 .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
 .cap { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 4px; max-width: 160px; }
 .cap span { display: block; height: 100%; background: var(--ink-2); }
+.use { display: grid; gap: 3px; font-size: 12.5px; min-width: 0; }
+.use > div { display: flex; gap: 8px; align-items: baseline; }
+.use b { font: 600 14px var(--font-mono); }
+.doing { color: var(--ok); font-size: 12px; align-items: center !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doing.warn { color: var(--warn); }
+.live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
 .ops { display: flex; align-items: center; gap: 4px; }
 .ops .switch { margin-right: 6px; }
 a.btn { text-decoration: none; }
@@ -179,6 +209,7 @@ a.btn.disabled { opacity: 0.5; pointer-events: none; }
 }
 @media (max-width: 900px) {
   .tool { grid-template-columns: auto minmax(0, 1fr); }
-  .state, .ops { grid-column: 2; }
+  .use, .state, .ops { grid-column: 2; }
+  .use { grid-auto-flow: column; justify-content: start; gap: 14px; }
 }
 </style>

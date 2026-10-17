@@ -51,6 +51,8 @@ export interface Settings {
   idleMinutes?: number // 连续无输出多久判定为卡住
   timeoutMinutes?: number // 单次尝试最长时间
   paused?: boolean // 暂停派发
+  confirmPlan?: boolean // lead 生成的计划先等你确认
+  review?: boolean // 验证通过后由评审工具审阅再合并
 }
 
 export interface TokenUsage {
@@ -103,6 +105,8 @@ export interface Task {
   attempts?: number
   lastError?: string
   waiting?: string // 等你处理时的说明
+  request?: string // 由哪条需求的计划生成
+  conflictFails?: number
 }
 
 // 新建 / 修改任务时提交的字段
@@ -132,6 +136,8 @@ export interface Report {
   files?: number
   added?: number
   removed?: number
+  review?: 'pass' | 'changes' // 评审结论
+  issues?: string[]
 }
 
 export interface Project {
@@ -149,6 +155,52 @@ export interface Project {
   setupCommand?: string
   deliverable?: boolean // 全部任务已合并，可以交付到主分支
   deliverNote?: string
+  requests?: Request[]
+  tokenBudget?: number // 0 表示不限
+  spent?: number // 累计 token
+}
+
+// 一条需求：lead 分析仓库后拆成计划，确认后变成任务
+export type RequestStatus = 'planning' | 'questions' | 'proposed' | 'approved' | 'failed' | 'discarded'
+
+export interface PlanTask {
+  id: string
+  title: string
+  description?: string
+  kind: Task['kind']
+  role: RoleId
+  assignee?: string
+  dependsOn: string[] | null
+  scope: string[] | null
+  acceptance: string[] | null
+  verify: string[] | null
+  manual?: boolean
+}
+
+export interface Plan {
+  summary: string
+  testCommand?: string
+  setupCommand?: string
+  tasks: PlanTask[]
+}
+
+export interface Request {
+  id: string
+  text: string
+  status: RequestStatus
+  qa: string[] | null
+  questions: string[] | null
+  feedback?: string
+  plan?: Plan
+  notes: string[] | null
+  errors: string[] | null
+  attempts: number
+  error?: string
+  tool?: string
+  tasks: string[] | null
+  tokens: number
+  createdAt: string
+  updatedAt: string
 }
 
 // 添加项目
@@ -173,7 +225,7 @@ export interface RunStat {
   attempt: number
   startedAt: number
   lastActivity: number
-  phase: 'running' | 'verifying' | 'integrating' | 'done' | 'failed' | 'stopped' | 'waiting'
+  phase: 'running' | 'verifying' | 'reviewing' | 'integrating' | 'planning' | 'done' | 'failed' | 'stopped' | 'waiting' | 'awaiting-review'
   files: string[]
   added: number
   removed: number

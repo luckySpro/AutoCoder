@@ -61,6 +61,22 @@ func TestProjectFlowOverHTTP(t *testing.T) {
 	if rec := do(h, "POST", "/api/projects/web/tasks", `{"title":"写 a","acceptance":["有 a.txt"," "],"verify":["test -f a.txt"]}`, local); rec.Code != 201 {
 		t.Fatal(rec.Code, rec.Body)
 	}
+	// 需求：空需求拒绝；放弃后不再规划
+	if rec := do(h, "POST", "/api/projects/web/requests", `{"text":"  "}`, local); rec.Code != 422 {
+		t.Fatal("空需求应拒绝", rec.Code)
+	}
+	if rec := do(h, "POST", "/api/projects/web/requests", `{"text":"做一个登录页"}`, local); rec.Code != 201 || !strings.Contains(rec.Body.String(), `"R1"`) {
+		t.Fatal(rec.Code, rec.Body)
+	}
+	if rec := do(h, "POST", "/api/projects/web/requests/R1/answer", `{"text":"好"}`, local); rec.Code != 409 {
+		t.Fatal("没有问题时不能回答", rec.Code)
+	}
+	if rec := do(h, "POST", "/api/projects/web/requests/R1/discard", "", local); rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body)
+	}
+	if rec := do(h, "PATCH", "/api/projects/web", `{"tokenBudget":-1}`, local); rec.Code != 422 {
+		t.Fatal("负预算应拒绝", rec.Code)
+	}
 	s.Engine.Start(context.Background())
 
 	// 等它开始运行，然后接上实时输出

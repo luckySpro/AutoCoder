@@ -102,11 +102,13 @@ func (e *Engine) recover() {
 	for _, p := range e.Store.Projects() {
 		for _, t := range p.Tasks {
 			switch t.Status {
-			case project.Running, project.Testing, project.Integrating, project.Review:
+			case project.Running, project.Testing, project.Integrating:
 				t.Status = project.Ready
 				t.LastError = "AutoCoder 重启，上一次尝试被中断"
 				_ = project.SaveTask(p, t)
 			}
+			// review 状态保持不变：调度器会重新派出评审；planning 的需求同样会重新规划
+
 		}
 	}
 }
@@ -178,6 +180,17 @@ func (e *Engine) Schedule(ctx context.Context) {
 	e.mu.Unlock()
 
 	var picks []pick
+	var jobs []func()
+	freeSlot := func() (int, bool) {
+		if len(usedSlots) >= st.Concurrency {
+			return 0, false
+		}
+		slot := 0
+		for usedSlots[slot] {
+			slot++
+		}
+		return slot, true
+	}
 	e.Store.Lock()
 	for _, p := range e.Store.Projects() {
 		for _, t := range p.Tasks {
@@ -189,17 +202,61 @@ func (e *Engine) Schedule(ctx context.Context) {
 	}
 	if !st.Paused {
 		for _, p := range e.Store.Projects() {
-			for _, t := range p.Tasks {
-				if t.Status != project.Ready || len(usedSlots) >= st.Concurrency {
+			if OverBudget(p) {
+				continue // 预算用完：这个项目不再派发，等你提高预算（§6.7）
+			}
+			// 1. 规划：需求交给 lead（只读）
+			for _, r := range p.Requests {
+				if r.Status != project.ReqPlanning || e.activeRun(p.ID+"/"+r.ID) {
 					continue
+				}
+				slot, ok := freeSlot()
+				if !ok {
+					break
+				}
+				tool, ok := chooseTool(&project.Task{Role: string(roles.Lead)}, tools, assigns, busyTools, cooling)
+				if !ok {
+					continue
+				}
+				usedSlots[slot], busyTools[tool.ID] = true, true
+				r.Attempts++
+				r.Tool = tool.ID
+				_ = project.SaveRequest(p, r)
+				run := e.startRun(Stat{ProjectID: p.ID, TaskID: r.ID, Tool: tool.ID, Role: string(roles.Lead), Attempt: r.Attempts, Phase: "planning"}, slot)
+				p, id := p, r.ID
+				jobs = append(jobs, func() { e.plan(context.WithoutCancel(ctx), p, id, tool, run, st) })
+			}
+			// 2. 评审：验证通过的任务交给评审工具（只读）
+			for _, t := range p.Tasks {
+				if t.Status != project.Review || e.activeRun(p.ID+"/"+t.ID) {
+					continue
+				}
+				slot, ok := freeSlot()
+				if !ok {
+					break
+				}
+				author := e.authorOf(p.ID, t)
+				tool, ok := chooseReviewer(tools, assigns, busyTools, cooling, author)
+				if !ok {
+					continue
+				}
+				usedSlots[slot], busyTools[tool.ID] = true, true
+				run := e.reuseRun(Stat{ProjectID: p.ID, TaskID: t.ID, Tool: tool.ID, Role: string(roles.Reviewer), Attempt: t.Attempts, Phase: "reviewing"}, slot)
+				p, id := p, t.ID
+				jobs = append(jobs, func() { e.review(context.WithoutCancel(ctx), p, id, tool, author, run, st) })
+			}
+			// 3. 开发任务
+			for _, t := range p.Tasks {
+				if t.Status != project.Ready {
+					continue
+				}
+				slot, ok := freeSlot()
+				if !ok {
+					break
 				}
 				tool, ok := chooseTool(t, tools, assigns, busyTools, cooling)
 				if !ok {
 					continue
-				}
-				slot := 0
-				for usedSlots[slot] {
-					slot++
 				}
 				usedSlots[slot] = true
 				busyTools[tool.ID] = true
@@ -213,16 +270,75 @@ func (e *Engine) Schedule(ctx context.Context) {
 	e.Store.Unlock()
 
 	for _, pk := range picks {
-		run := newRun(Stat{
-			ProjectID: pk.p.ID, TaskID: pk.t.ID, Tool: pk.tool.ID, Role: pk.t.Role,
-			Attempt: pk.t.Attempts, StartedAt: time.Now().UnixMilli(), LastActivity: time.Now().UnixMilli(), Phase: "running",
-		})
-		run.slot = pk.slot
-		e.mu.Lock()
-		e.runs[run.Key()] = run
-		e.mu.Unlock()
+		run := e.startRun(Stat{ProjectID: pk.p.ID, TaskID: pk.t.ID, Tool: pk.tool.ID, Role: pk.t.Role, Attempt: pk.t.Attempts, Phase: "running"}, pk.slot)
 		go e.attempt(context.WithoutCancel(ctx), pk.p, pk.t.ID, pk.tool, run, st)
 	}
+	for _, j := range jobs {
+		go j()
+	}
+}
+
+// startRun 登记一次新的运行（替换同一任务之前的记录）。
+func (e *Engine) startRun(s Stat, slot int) *Run {
+	now := time.Now().UnixMilli()
+	s.StartedAt, s.LastActivity = now, now
+	run := newRun(s)
+	run.slot = slot
+	e.mu.Lock()
+	e.runs[run.Key()] = run
+	e.mu.Unlock()
+	return run
+}
+
+// reuseRun 在同一任务已有的输出后面接着运行（评审接在开发尝试之后，输出连续可看）。
+func (e *Engine) reuseRun(s Stat, slot int) *Run {
+	e.mu.Lock()
+	run := e.runs[s.ProjectID+"/"+s.TaskID]
+	e.mu.Unlock()
+	if run == nil {
+		return e.startRun(s, slot)
+	}
+	run.mu.Lock()
+	run.slot = slot
+	run.stopBy = ""
+	run.mu.Unlock()
+	run.update(func(st *Stat) {
+		now := time.Now().UnixMilli()
+		st.Tool, st.Role, st.Attempt, st.Phase = s.Tool, s.Role, s.Attempt, s.Phase
+		st.StartedAt, st.LastActivity, st.Exit, st.Result = now, now, nil, ""
+	})
+	return run
+}
+
+func (e *Engine) activeRun(key string) bool {
+	e.mu.Lock()
+	r := e.runs[key]
+	e.mu.Unlock()
+	return r != nil && r.Active()
+}
+
+// authorOf 返回写这个任务代码的工具（评审时尽量换一个工具）。
+func (e *Engine) authorOf(projectID string, t *project.Task) string {
+	e.mu.Lock()
+	r := e.runs[projectID+"/"+t.ID]
+	e.mu.Unlock()
+	if r != nil {
+		if s := r.Snapshot(); s.Role != string(roles.Reviewer) {
+			return s.Tool
+		}
+		r.mu.Lock()
+		a := r.author
+		r.mu.Unlock()
+		if a != "" {
+			return a
+		}
+	}
+	return t.Assignee
+}
+
+// OverBudget 表示项目的 token 已用完预算（调用方持有锁）。
+func OverBudget(p *project.Project) bool {
+	return p.TokenBudget > 0 && p.Spent >= p.TokenBudget
 }
 
 func slotOf(r *Run) int {
@@ -303,6 +419,9 @@ func (e *Engine) attempt(ctx context.Context, p *project.Project, taskID string,
 		run.emit(Event{Type: "raw", Text: text, Tone: tone})
 		writeLog(logf, text, false)
 	}
+	run.mu.Lock()
+	run.author = tool.ID
+	run.mu.Unlock()
 	say(fmt.Sprintf("%s · 第 %d 次尝试 · %s", tool.Name, t.Attempts, t.Branch), "dim")
 
 	dir := p.TaskDir(t.ID)
@@ -345,14 +464,14 @@ func (e *Engine) attempt(ctx context.Context, p *project.Project, taskID string,
 
 	// 3. 运行工具
 	prompt := buildPrompt(p, &t, deps, conflicts)
-	out := e.exec(ctx, dir, tool, prompt, run, logf, st)
+	out := e.exec(ctx, dir, tool, prompt, false, run, logf, st)
 	out.conflicts = conflicts
 	usage := out.usage
 	if !out.exact {
 		usage = estimate(prompt, strings.Join(out.tail, "\n")+out.final)
 	}
 	run.update(func(s *Stat) { s.Tokens = usage.Total() })
-	e.recordUsage(p, &t, tool.ID, run, out, usage)
+	e.recordUsage(p, t.ID, t.Role, t.Attempts, tool.ID, run, out, usage)
 
 	// 4. 判断结果并验证
 	e.afterExit(ctx, p, t.ID, tool, run, logf, st, out, usage, startSHA, fromIntegration, logPath)
@@ -403,9 +522,9 @@ func writeLog(f *os.File, text string, isErr bool) {
 }
 
 // exec 启动工具进程并观察：输出、文件变化、卡住与超时。
-func (e *Engine) exec(ctx context.Context, dir string, tool toolscan.Detection, prompt string, run *Run, logf *os.File, st settings.Settings) outcome {
+func (e *Engine) exec(ctx context.Context, dir string, tool toolscan.Detection, prompt string, readonly bool, run *Run, logf *os.File, st settings.Settings) outcome {
 	start := time.Now()
-	args := tool.Args(prompt, false)
+	args := tool.Args(prompt, readonly)
 	cmd := exec.Command(tool.Path, args...)
 	cmd.Dir = dir
 	cmd.Stdin = nil // 读到的是空设备：工具一旦等待输入会立刻读到结束
@@ -590,13 +709,13 @@ func containsAny(s string, keys []string) bool {
 	return false
 }
 
-func (e *Engine) recordUsage(p *project.Project, t *project.Task, tool string, run *Run, out outcome, usage project.Tokens) {
+func (e *Engine) recordUsage(p *project.Project, taskID, role string, attempt int, tool string, run *Run, out outcome, usage project.Tokens) {
 	if out.startErr != nil {
 		return
 	}
 	u := project.Usage{
-		ID: fmt.Sprintf("%s-%s-%d-%d", p.ID, t.ID, t.Attempts, time.Now().Unix()), ProjectID: p.ID, TaskID: t.ID,
-		Tool: tool, Role: t.Role, At: time.UnixMilli(run.Snapshot().StartedAt), DurationSec: int(out.duration.Seconds()),
+		ID: fmt.Sprintf("%s-%s-%s-%d-%d", p.ID, taskID, role, attempt, time.Now().UnixNano()), ProjectID: p.ID, TaskID: taskID,
+		Tool: tool, Role: role, At: time.UnixMilli(run.Snapshot().StartedAt), DurationSec: int(out.duration.Seconds()),
 		ExitCode: out.exit, Usage: usage, Estimated: !out.exact,
 	}
 	e.Store.Lock()
@@ -722,7 +841,7 @@ func (e *Engine) afterExit(ctx context.Context, p *project.Project, taskID strin
 	if leftover := conflictMarkers(dir, out.conflicts); len(leftover) > 0 {
 		_, _ = gitops.Run(ctx, dir, "merge", "--abort")
 		reason := "合并冲突没有解决：" + strings.Join(leftover, "、")
-		e.finishReport(p, t.ID, run, "failed", report, reason, func(t *project.Task) { e.retryOrBlock(t, st, reason) })
+		e.finishReport(p, t.ID, run, "failed", report, reason, func(t *project.Task) { e.conflictFailed(t, st, reason, leftover) })
 		return
 	}
 
@@ -862,14 +981,40 @@ func (e *Engine) verifyAndIntegrate(ctx context.Context, p *project.Project, tas
 		return
 	}
 
+	// 评审：交给评审工具，通过后再集成（§6.5 第 6 步）
+	if st.Review {
+		report.Status = project.Review
+		e.finishReport(p, t.ID, run, "awaiting-review", report, summaryWith(summary, reviewWaitNote), func(t *project.Task) {
+			t.Status = project.Review
+			t.Commits = commits
+			t.ReviewTries = 0
+		})
+		return
+	}
+	e.integrateTask(ctx, p, t.ID, toolID, run, logf, st, report, summary)
+}
+
+// integrateTask 把任务合并进集成分支；全部合并后按设置交付到主分支。
+func (e *Engine) integrateTask(ctx context.Context, p *project.Project, taskID, toolID string, run *Run, logf *os.File, st settings.Settings, report project.Report, summary string) {
+	e.Store.Lock()
+	t := *p.Task(taskID)
+	e.Store.Unlock()
+	commits := gitops.CountCommits(ctx, p.Path, p.IntegrationBranch, t.Branch)
+	dir := p.TaskDir(taskID)
+
 	// 集成：每个项目同一时间只合并一个任务
 	run.update(func(s *Stat) { s.Phase = "integrating" })
 	e.setStatus(p, t.ID, project.Integrating)
 	mergeErr := e.integrate(ctx, p, &t, run, logf)
 	if mergeErr != nil {
 		reason := mergeErr.Error()
+		var ce *gitops.ConflictError
 		e.finishReport(p, t.ID, run, "failed", report, summaryWith(summary, reason), func(t *project.Task) {
 			t.Commits = commits
+			if errors.As(mergeErr, &ce) {
+				e.conflictFailed(t, st, reason, ce.Files)
+				return
+			}
 			e.retryOrBlock(t, st, reason)
 		})
 		return
@@ -879,6 +1024,7 @@ func (e *Engine) verifyAndIntegrate(ctx context.Context, p *project.Project, tas
 		t.Status = project.Merged
 		t.Commits = commits
 		t.LastError = ""
+		t.ConflictFails = 0
 	})
 	_ = gitops.RemoveWorktree(ctx, p.Path, dir) // 分支保留，worktree 不再需要
 	e.mu.Lock()
@@ -900,6 +1046,19 @@ func (e *Engine) verifyAndIntegrate(ctx context.Context, p *project.Project, tas
 	}
 }
 
+// conflictFailed：冲突连续 2 次没能解决，转给你处理（§6.6）。
+func (e *Engine) conflictFailed(t *project.Task, st settings.Settings, reason string, files []string) {
+	t.ConflictFails++
+	if t.ConflictFails >= 2 {
+		t.LastError = reason
+		t.Status = project.WaitingUser
+		t.Waiting = fmt.Sprintf("与集成分支连续 %d 次冲突没能自动解决：%s。可以在任务分支 %s 上手动解决并提交后点「重试」，或取消这个任务。",
+			t.ConflictFails, strings.Join(files, "、"), t.Branch)
+		return
+	}
+	e.retryOrBlock(t, st, reason)
+}
+
 // integrate 把任务分支 --no-ff 合并到集成分支并跑项目测试；失败则把集成分支退回原位。
 func (e *Engine) integrate(ctx context.Context, p *project.Project, t *project.Task, run *Run, logf *os.File) error {
 	p.GitMu.Lock()
@@ -916,7 +1075,7 @@ func (e *Engine) integrate(ctx context.Context, p *project.Project, t *project.T
 	if _, err := gitops.Merge(ctx, ctl, t.Branch, msg); err != nil {
 		var ce *gitops.ConflictError
 		if errors.As(err, &ce) {
-			return fmt.Errorf("与集成分支冲突：%s。下次尝试会先合入集成分支再解决", strings.Join(ce.Files, "、"))
+			return fmt.Errorf("与集成分支%w。下次尝试会先合入集成分支再解决", ce)
 		}
 		return fmt.Errorf("合并到集成分支失败：%w", err)
 	}
@@ -1201,11 +1360,16 @@ func (e *Engine) Retry(projectID, taskID string) error {
 	switch t.Status {
 	case project.Running, project.Testing, project.Integrating:
 		return errors.New("任务正在运行")
+	case project.Review:
+		if e.activeRun(projectID + "/" + taskID) {
+			return errors.New("任务正在评审")
+		}
 	case project.Merged:
 		return errors.New("任务已经合并")
 	}
 	if t.Status == project.Blocked || t.Status == project.Cancelled || t.Status == project.WaitingUser {
 		t.Attempts = 0
+		t.ConflictFails = 0
 	}
 	if t.Assignee != "" {
 		e.ClearAuth(t.Assignee)

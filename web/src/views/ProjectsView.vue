@@ -113,16 +113,16 @@ function added(id: string) {
 .stat.accent .v { color: var(--accent); }
 .stat.bad .v { color: var(--bad); }
 
-.list { display: grid; gap: 10px; }
+.list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .proj {
   display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: 28px; align-items: center;
   padding: 18px 20px; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--surface);
   color: var(--ink); text-decoration: none; transition: border-color 0.15s, box-shadow 0.15s;
 }
 .proj:hover { border-color: var(--line-strong); box-shadow: var(--shadow); text-decoration: none; }
-.id { display: grid; gap: 6px; min-width: 0; }
+.id { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
 .id h2 { font-size: 16px; font-weight: 650; }
-.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .progress { display: grid; gap: 8px; }
 .strip { display: flex; gap: 3px; height: 10px; }
 .seg { flex: 1; border-radius: 3px; background: var(--line); }
@@ -144,7 +144,7 @@ function added(id: string) {
 .add b { color: var(--ink); }
 .add:hover { background: var(--surface); }
 @media (max-width: 960px) {
-  .proj { grid-template-columns: 1fr; gap: 14px; }
+  .proj { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .side { justify-items: start; grid-auto-flow: column; align-items: center; justify-content: space-between; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat:nth-child(3) { border-left: 0; }

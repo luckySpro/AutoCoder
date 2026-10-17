@@ -25,13 +25,15 @@ type Settings struct {
 	IdleMinutes    int  `json:"idleMinutes"`    // 连续无输出、无文件变化多久判定为卡住
 	TimeoutMinutes int  `json:"timeoutMinutes"` // 单次尝试最长时间
 	Paused         bool `json:"paused"`         // 暂停派发：不再启动新任务，运行中的跑完
+	ConfirmPlan    bool `json:"confirmPlan"`    // lead 生成的计划先等你确认再派发
+	Review         bool `json:"review"`         // 验证通过后由评审工具审阅改动再合并
 	// Assignments 为空表示使用推荐分配。
 	Assignments []roles.Assignment `json:"assignments"`
 }
 
 // Default 返回默认设置。
 func Default() Settings {
-	return Settings{Concurrency: DefaultConcurrency, AutoMerge: true, MaxAttempts: 3, IdleMinutes: 10, TimeoutMinutes: 45}
+	return Settings{Concurrency: DefaultConcurrency, AutoMerge: true, MaxAttempts: 3, IdleMinutes: 10, TimeoutMinutes: 45, ConfirmPlan: true, Review: true}
 }
 
 // Normalize 把越界的值收回合法范围。

@@ -58,6 +58,7 @@ type Meta struct {
 	ScopeAllow        []string  `yaml:"scope_allow,omitempty" json:"scopeAllow"`
 	CreatedAt         time.Time `yaml:"created_at" json:"createdAt"`
 	DeliveredAt       time.Time `yaml:"delivered_at,omitempty" json:"deliveredAt,omitempty"` // 最近一次交付到主分支的时间
+	TokenBudget       int64     `yaml:"token_budget,omitempty" json:"tokenBudget"`            // 项目 token 预算，0 表示不限
 }
 
 // Task 是 .autocoder/tasks/<id>.yaml。
@@ -78,6 +79,11 @@ type Task struct {
 	Commits     int       `yaml:"commits,omitempty" json:"commits"`
 	LastError   string    `yaml:"last_error,omitempty" json:"lastError,omitempty"`
 	Waiting     string    `yaml:"waiting,omitempty" json:"waiting,omitempty"` // waiting-user 时需要你处理的事
+	Request     string    `yaml:"request,omitempty" json:"request,omitempty"` // 由哪条需求的计划生成
+	// ConflictFails 是连续合并冲突的次数，达到 2 次转给你（§6.6）。
+	ConflictFails int `yaml:"conflict_fails,omitempty" json:"conflictFails,omitempty"`
+	// ReviewTries 是评审结论无法解析时已重跑的次数。
+	ReviewTries int       `yaml:"review_tries,omitempty" json:"-"`
 	UpdatedAt   time.Time `yaml:"updated_at" json:"updatedAt"`
 }
 
@@ -97,6 +103,8 @@ type Report struct {
 	Files   int       `json:"files,omitempty"`
 	Added   int       `json:"added,omitempty"`
 	Removed int       `json:"removed,omitempty"`
+	Review  string    `json:"review,omitempty"` // 评审结论：pass | changes
+	Issues  []string  `json:"issues,omitempty"` // 评审提出的问题
 }
 
 // Usage 是一次工具调用的计量记录（DESIGN §7.2）。
@@ -127,9 +135,12 @@ func (t Tokens) Total() int64 { return t.Input + t.Output + t.CacheRead + t.Cach
 // Project 是一个已接管的仓库在内存中的状态。
 type Project struct {
 	Meta
-	Path    string // 用户的仓库目录
-	Tasks   []*Task
-	Reports []Report
+	Path     string // 用户的仓库目录
+	Tasks    []*Task
+	Requests []*Request
+	Reports  []Report
+	// Spent 是该项目累计的 token（启动时从计量记录汇总，之后随记录累加）。
+	Spent int64
 
 	// GitMu 串行化集成 worktree 中的 git 操作（状态提交、合并、回退）。
 	GitMu sync.Mutex
@@ -439,6 +450,24 @@ func loadState(p *Project) error {
 		p.Tasks = append(p.Tasks, &t)
 	}
 	sortTasks(p.Tasks)
+	p.Requests = nil
+	reqs, _ := filepath.Glob(filepath.Join(p.stateDir(), "requests", "*.yaml"))
+	for _, f := range reqs {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		var r Request
+		if err := yaml.Unmarshal(data, &r); err != nil {
+			return fmt.Errorf("%s 解析失败：%w", filepath.Base(f), err)
+		}
+		p.Requests = append(p.Requests, &r)
+	}
+	sort.SliceStable(p.Requests, func(i, j int) bool { return p.Requests[i].CreatedAt.Before(p.Requests[j].CreatedAt) })
+	p.Spent = 0
+	for _, u := range ReadUsage(p) {
+		p.Spent += u.Usage.Total()
+	}
 	reports, _ := filepath.Glob(filepath.Join(p.stateDir(), "reports", "*.md"))
 	for _, f := range reports {
 		rs, err := readReports(f)
@@ -718,7 +747,9 @@ func AppendUsage(p *Project, u Usage) error {
 		return err
 	}
 	defer f.Close()
-	_, err = f.Write(append(data, '\n'))
+	if _, err = f.Write(append(data, '\n')); err == nil {
+		p.Spent += u.Usage.Total()
+	}
 	return err
 }
 
@@ -765,7 +796,9 @@ type View struct {
 	Path      string     `json:"path"`
 	UpdatedAt time.Time  `json:"updatedAt"`
 	Tasks     []TaskView `json:"tasks"`
+	Requests  []Request  `json:"requests"`
 	Reports   []Report   `json:"reports"`
+	Spent     int64      `json:"spent"`
 }
 
 // 各阶段对应的进度条位置（只表示阶段，不是工作量估计）。
@@ -776,7 +809,13 @@ var stageProgress = map[string]int{
 
 // ToView 生成项目视图（调用方持有锁）。
 func ToView(p *Project) View {
-	v := View{Meta: p.Meta, Path: p.Path, UpdatedAt: p.CreatedAt, Tasks: []TaskView{}, Reports: []Report{}}
+	v := View{Meta: p.Meta, Path: p.Path, UpdatedAt: p.CreatedAt, Tasks: []TaskView{}, Requests: []Request{}, Reports: []Report{}, Spent: p.Spent}
+	for i := len(p.Requests) - 1; i >= 0; i-- { // 最新的在前
+		v.Requests = append(v.Requests, *p.Requests[i])
+		if p.Requests[i].UpdatedAt.After(v.UpdatedAt) {
+			v.UpdatedAt = p.Requests[i].UpdatedAt
+		}
+	}
 	for _, t := range p.Tasks {
 		v.Tasks = append(v.Tasks, TaskView{Task: *t, Progress: stageProgress[t.Status]})
 		if t.UpdatedAt.After(v.UpdatedAt) {

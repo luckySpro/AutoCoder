@@ -150,7 +150,7 @@ export function clock(at: number) {
 interface ServerEvent { seq: number; at: number; type: 'raw' | 'act' | 'stat'; text?: string; tone?: Tone; err?: boolean; kind?: ActKind; meta?: string; stat?: RunStat }
 
 const sources = new Map<string, { es: EventSource; refs: number }>()
-const ACTIVE = ['running', 'verifying', 'integrating']
+const ACTIVE = ['running', 'verifying', 'reviewing', 'integrating', 'planning']
 
 // 是否有可看的运行记录
 export function hasRun(projectId: string, taskId: string) {

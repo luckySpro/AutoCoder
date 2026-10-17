@@ -139,6 +139,26 @@ async function save() {
         </div>
         <div class="panel set">
           <div>
+            <h2>计划先给我确认</h2>
+            <p class="muted small">lead 把需求拆成任务后，先在项目页展示任务图，你确认、删减或要求重新生成后才开始派发。关闭后计划通过校验就直接开始。</p>
+          </div>
+          <label class="switch big">
+            <input type="checkbox" v-model="store.settings.confirmPlan" aria-label="计划先给我确认" @change="saved = false" />
+            <span></span>
+          </label>
+        </div>
+        <div class="panel set">
+          <div>
+            <h2>合并前评审</h2>
+            <p class="muted small">验证通过后，由评审工具在只读模式下看 diff 和验收标准；要求修改时带着问题清单重试。评审尽量交给不是作者的工具。</p>
+          </div>
+          <label class="switch big">
+            <input type="checkbox" v-model="store.settings.review" aria-label="合并前评审" @change="saved = false" />
+            <span></span>
+          </label>
+        </div>
+        <div class="panel set">
+          <div>
             <h2>暂停派发</h2>
             <p class="muted small">不再启动新任务，正在运行的会跑完。</p>
           </div>

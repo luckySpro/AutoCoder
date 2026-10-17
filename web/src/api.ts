@@ -1,13 +1,13 @@
 import { reactive } from 'vue'
 import { mockAssignments, mockIdentity, mockLocal, mockProjects, mockRepos, mockRoles, mockRunning, mockTools, mockUsage } from './mock'
 import type {
-  Assignment, CreateProjectRequest, GitIdentity, GitRepo, LocalRepo, Project, Report, RoleId, RoleInfo, RunningTask, RunStat, Settings,
+  Assignment, CreateProjectRequest, GitIdentity, GitRepo, LocalRepo, Plan, Project, Report, RoleId, RoleInfo, RunningTask, RunStat, Settings,
   Task, TaskInput, ToolDetection, ToolSpec, UsageRecord,
 } from './types'
 
 const ASSIGN_KEY = 'autocoder.assignments'
 const SETTINGS_KEY = 'autocoder.settings'
-export const DEFAULT_SETTINGS: Settings = { concurrency: 3, autoMerge: true }
+export const DEFAULT_SETTINGS: Settings = { concurrency: 3, autoMerge: true, confirmPlan: true, review: true }
 export const MAX_CONCURRENCY = 5
 export const STRENGTHS = ['architecture', 'coding', 'frontend', 'testing', 'review']
 export const strengthName: Record<string, string> = {
@@ -223,12 +223,13 @@ export async function refresh() {
     remote: x.remote || undefined,
     tasks: x.tasks.map((t) => ({ ...t, dependsOn: t.dependsOn ?? [], assignee: t.assignee ?? '' })),
     reports: (x.reports ?? []).map((rp) => ({ ...rp, at: fmtAt(rp.at) })),
+    requests: (x.requests ?? []).map((rq) => ({ ...rq, createdAt: fmtAt(rq.createdAt), updatedAt: fmtAt(rq.updatedAt) })),
   }))
   store.loadErrors = p.errors ?? []
   store.runStats = r.runs
   store.toolState = r.tools ?? {}
   store.running = r.runs
-    .filter((x) => x.phase === 'running' || x.phase === 'verifying' || x.phase === 'integrating')
+    .filter((x) => ['running', 'verifying', 'reviewing', 'integrating', 'planning'].includes(x.phase))
     .map((x) => ({ tool: x.tool, projectId: x.projectId, taskId: x.taskId, role: x.role, startedAt: hhmm(new Date(x.startedAt)) }))
   store.usage = u.records.map((x) => ({ ...x, at: `${mmdd(new Date(x.at))} ${hhmm(new Date(x.at))}` }))
   realLoaded = true
@@ -255,7 +256,7 @@ export async function createProject(req: CreateProjectRequest): Promise<{ id: st
   return { id: r.project.id, warnings: r.warnings ?? [] }
 }
 
-export function updateProject(id: string, patch: Partial<Pick<Project, 'description' | 'testCommand' | 'setupCommand'>>) {
+export function updateProject(id: string, patch: Partial<Pick<Project, 'description' | 'testCommand' | 'setupCommand' | 'tokenBudget'>>) {
   return mutate<Project>('PATCH', `/api/projects/${pid(id)}`, patch)
 }
 
@@ -294,6 +295,55 @@ export async function taskAction(projectId: string, taskId: string, action: 'ret
 export async function deliverProject(projectId: string): Promise<{ status: string; detail?: string; commit?: string; note?: string }> {
   if (store.demo) throw new ApiError('预览模式不能交付，请在本机运行 AutoCoder', 0)
   return mutate('POST', `/api/projects/${pid(projectId)}/deliver`)
+}
+
+// ---------- 需求与计划 ----------
+
+const demoOnly = () => {
+  throw new ApiError('预览模式不能规划，请在本机运行 AutoCoder', 0)
+}
+
+export async function createRequest(projectId: string, text: string) {
+  if (store.demo) demoOnly()
+  return mutate<{ id: string }>('POST', `/api/projects/${pid(projectId)}/requests`, { text })
+}
+
+export async function requestAction(projectId: string, reqId: string, action: 'answer' | 'regenerate' | 'approve' | 'discard', text?: string) {
+  if (store.demo) {
+    // 预览：确认计划时把计划变成任务，便于看到效果
+    const p = store.projects.find((x) => x.id === projectId)
+    const r = p?.requests?.find((x) => x.id === reqId)
+    if (p && r && action === 'approve' && r.plan) {
+      const base = p.tasks.reduce((n, t) => Math.max(n, Number(t.id.replace(/\D/g, '')) || 0), 0)
+      const map = new Map(r.plan.tasks.map((t, i) => [t.id, `T${base + i + 1}`]))
+      for (const pt of r.plan.tasks) {
+        const deps = (pt.dependsOn ?? []).map((d) => map.get(d) ?? d)
+        p.tasks.push({
+          id: map.get(pt.id)!, title: pt.title, description: pt.description, kind: pt.kind, role: pt.role, assignee: pt.assignee ?? '',
+          status: deps.length ? 'planned' : 'ready', dependsOn: deps, branch: `ac/${map.get(pt.id)}-${pt.kind}`, progress: 0, commits: 0,
+          scope: pt.scope ?? [], acceptance: pt.acceptance ?? [], verify: pt.verify ?? [], request: r.id,
+        })
+      }
+      r.status = 'approved'
+      r.tasks = [...map.values()]
+      return
+    }
+    if (r && action === 'discard') {
+      r.status = 'discarded'
+      return
+    }
+    demoOnly()
+  }
+  return mutate('POST', `/api/projects/${pid(projectId)}/requests/${pid(reqId)}/${action}`, text === undefined ? undefined : { text })
+}
+
+export async function savePlan(projectId: string, reqId: string, plan: Plan) {
+  if (store.demo) {
+    const r = store.projects.find((x) => x.id === projectId)?.requests?.find((x) => x.id === reqId)
+    if (r) r.plan = plan
+    return
+  }
+  return mutate('PUT', `/api/projects/${pid(projectId)}/requests/${pid(reqId)}/plan`, plan)
 }
 
 export async function stopRemoteRun(projectId: string, taskId: string) {

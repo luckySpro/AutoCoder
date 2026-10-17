@@ -6,7 +6,7 @@
 
 设计与规划见 [docs/DESIGN.md](docs/DESIGN.md)。
 
-## 当前进度（M2，含部分 M3）
+## 当前进度（M3）
 
 - ✅ 工具清单与启动检测，清单在界面上直接增删改、启停、导入导出，包括无人值守、事件流、只读参数和"未登录 / 限流"关键字（`internal/toolscan`）
 - ✅ 角色分配与运行设置保存在 `~/.autocoder/settings.json`（`internal/roles`、`internal/settings`）
@@ -15,7 +15,10 @@
 - ✅ 实时输出：解析 Claude Code / Cursor 的 stream-json、Codex 的 `--json` 事件、Gemini / Qwen 的 json 结果，SSE 推送与断点续传
 - ✅ Token 计量：每次调用一条记录，工具不上报时按字符数估算并标注
 - ✅ 集成队列与交付：`--no-ff` 合并到 `ac/integration`，合并后测试失败自动退回；全部合并后在临时 worktree 中生成交付合并，主目录干净时快进
-- ⏳ M3 余下部分：lead 从一句需求生成并校验计划、评审角色、"等你处理"汇总页（见路线图）
+- ✅ 从一句需求开始：lead 在只读副本里读仓库、产出计划，编排器校验（依赖、环、验收标准、验证命令，范围重叠的任务自动改为先后执行），不合格交回重写；需求不清楚时先问你；计划确认、删减或按意见重新生成
+- ✅ 合并前评审：评审工具只读审阅 diff 与验收标准，要求修改时带着问题清单重试；尽量不让作者自审
+- ✅ 冲突连续 2 次没能自动解决、token 预算用完时转给你处理
+- ⏳ 补测试子任务、受阻任务交给 lead 拆分改派、仓库锁与日志清理（见设计文档 §10.1）
 
 > 各工具的无人值守参数随版本变化，内置默认值按常见版本填写。第一次用某个工具前，建议在「工具清单」里核对它的参数。
 
@@ -40,10 +43,12 @@ npm --prefix web run dev        # Vite 开发服务器，/api 自动转发
 
 ## 截图
 
-| 项目 | 分支泳道（深色） |
+| 一句需求，lead 给出的计划 | 评审打回一个任务，另一个已合并 |
 |---|---|
+| ![](docs/screenshots/request-proposed.png) | ![](docs/screenshots/review-changes.png) |
+| **项目** | **分支泳道（深色）** |
 | ![](docs/screenshots/projects.png) | ![](docs/screenshots/project-lanes-dark.png) |
-| **添加项目** | **工具清单** |
+| **添加项目** | **工具清单（含各工具用量）** |
 | ![](docs/screenshots/add-project.png) | ![](docs/screenshots/tools.png) |
 | **运行监控（两个工具并行，真实进程）** | **任务完成并交付后的项目详情** |
 | ![](docs/screenshots/live-dark.png) | ![](docs/screenshots/project-done.png) |

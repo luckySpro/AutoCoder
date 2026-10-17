@@ -56,8 +56,33 @@ export const mockProjects: Project[] = [
       { id: 'T7', title: '订单页面', kind: 'ui', role: 'frontend', assignee: 'cursor-agent', status: 'planned', dependsOn: ['T3', 'T4'], branch: 'ac/T7-order-ui', progress: 0, commits: 0 },
       { id: 'T8', title: '端到端回归', kind: 'test', role: 'tester', assignee: 'codex', status: 'planned', dependsOn: ['T5', 'T7'], branch: 'ac/T8-e2e', progress: 0, commits: 0 },
     ],
+    tokenBudget: 3_000_000,
+    spent: 1_284_000,
+    requests: [
+      {
+        id: 'R2', status: 'proposed', tool: 'claude-code', attempts: 1, tokens: 41_200, createdAt: '08:31', updatedAt: '08:39',
+        text: '加会员模块：会员列表、等级与积分；下单时按等级打折，积分可抵扣运费', qa: [], questions: [], errors: [], tasks: [],
+        notes: ['P2 与 P3 的修改范围重叠（internal/member/** / internal/member/points.go），改为 P3 在 P2 合并后开始'],
+        plan: {
+          summary: '会员独立成 internal/member 包：Member、Level、PointsLedger 三张表。订单在结算时调用 member.Discount 与 member.RedeemShipping，接口在 P1 定好后 P2、P4 并行。\n假设：积分 100 分抵 1 元，只抵运费不抵商品金额。',
+          testCommand: 'go test ./...',
+          tasks: [
+            { id: 'P1', title: '会员数据模型与迁移', kind: 'feature', role: 'developer', dependsOn: [], scope: ['internal/member/model.go', 'migrations/**'], acceptance: ['三张表的迁移可重复执行', '等级有默认数据'], verify: ['go test ./internal/member/...'] },
+            { id: 'P2', title: '等级折扣与订单结算接入', kind: 'feature', role: 'developer', dependsOn: ['P1'], scope: ['internal/member/**', 'internal/order/checkout.go'], acceptance: ['金卡 9 折、银卡 95 折', '折扣写入订单明细'], verify: ['go test ./internal/member/... ./internal/order/...'] },
+            { id: 'P3', title: '积分账本与运费抵扣', kind: 'feature', role: 'developer', dependsOn: ['P1', 'P2'], scope: ['internal/member/points.go'], acceptance: ['积分变动有流水', '抵扣不超过运费'], verify: ['go test ./internal/member/...'] },
+            { id: 'P4', title: '会员列表与详情页', kind: 'ui', role: 'frontend', dependsOn: ['P1'], scope: ['web/src/views/member/**'], acceptance: ['列表可按等级筛选', '详情显示积分流水'], verify: ['npm --prefix web run type-check'] },
+          ],
+        },
+      },
+      {
+        id: 'R1', status: 'approved', tool: 'claude-code', attempts: 1, tokens: 63_800, createdAt: '10-14 09:02', updatedAt: '10-14 09:20',
+        text: '商城后台第一期：商品和订单的接口与页面，带集成测试和端到端回归', qa: [], questions: [], errors: [], notes: [],
+        tasks: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8'],
+      },
+    ],
     reports: [
-      { id: 'r10', taskId: 'T4', from: 'claude-code', at: '08:47', status: 'review', summary: '开始评审 T4：检查设计令牌命名与暗色对比度' },
+      { id: 'r11', taskId: 'R2', from: 'claude-code', at: '08:39', status: 'proposed' as never, summary: '生成了计划：4 个任务' },
+      { id: 'r10', taskId: 'T4', from: 'claude-code', at: '08:47', status: 'review', summary: '暗色主题下侧栏选中项对比度不足', review: 'changes', issues: ['web/src/styles/tokens.css：--nav-active 在暗色下对比度 2.8:1，需要 4.5:1 以上', '窄屏下侧栏缺少收起按钮'] },
       { id: 'r9', taskId: 'T6', from: 'codex', at: '08:42', status: 'review', summary: '12 个用例全部通过；顺手修复了分页越界返回 500 的问题，等待集成', commit: 'a41c9e2' },
       { id: 'r8', taskId: 'T4', from: 'cursor-agent', at: '08:30', status: 'review', summary: '布局与深浅主题令牌完成，等待评审', commit: '7d02b11' },
       { id: 'r7', taskId: 'T3', from: 'codex', at: '08:12', status: 'running', summary: '订单状态机（待支付→已支付→已发货→完成/取消）已实现，正在补退款分支', commit: 'e93f0a4' },

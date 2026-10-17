@@ -21,7 +21,12 @@ onBeforeUnmount(() => release(props.runId))
 
 const run = computed(() => runs.get(props.runId))
 const route = useRoute()
-const task = computed(() => store.projects.find((p) => p.id === run.value?.projectId)?.tasks.find((t) => t.id === run.value?.taskId))
+// 任务标题；规划中的需求显示需求原文
+const title = computed(() => {
+  const p = store.projects.find((x) => x.id === run.value?.projectId)
+  const id = run.value?.taskId
+  return p?.tasks.find((t) => t.id === id)?.title ?? p?.requests?.find((r) => r.id === id)?.text.slice(0, 80)
+})
 const view = ref<'acts' | 'raw'>('acts')
 const follow = ref(true)
 const query = ref('')
@@ -84,7 +89,7 @@ function stop() {
     <header class="bar">
       <AgentMark :id="run.tool" :size="26" />
       <div class="title">
-        <b><span class="mono tid">{{ run.taskId }}</span> {{ task?.title }}</b>
+        <b><span class="mono tid">{{ run.taskId }}</span> {{ title }}</b>
         <span class="sub">{{ toolName(run.tool) }} · 第 {{ run.attempt }} 次尝试 · {{ run.state === 'running' ? '已运行' : '用时' }} <span class="num">{{ fmtDuration(elapsed) }}</span></span>
       </div>
       <span class="activity" :class="idleTone" role="status"><i></i>{{ idleText }}</span>

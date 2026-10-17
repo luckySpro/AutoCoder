@@ -19,6 +19,10 @@ import (
 
 // 假的 CLI 工具：模仿 Claude Code 的 stream-json 输出，按环境变量决定行为。
 const fakeTool = `#!/bin/sh
+case "$*" in
+  *架构师*)   cat "$FAKE_PLAN"; exit 0;;
+  *代码评审*) cat "$FAKE_REVIEW"; exit 0;;
+esac
 case "$FAKE_MODE" in
   noop)  echo '{"type":"result","result":"我需要更多信息，要用哪个数据库？","usage":{"input_tokens":10,"output_tokens":5}}'; exit 0;;
   crash) echo "boom" >&2; exit 3;;
@@ -27,7 +31,7 @@ case "$FAKE_MODE" in
 esac
 echo '{"type":"system","subtype":"init","model":"fake-1"}'
 echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"开始写 hello"},{"type":"tool_use","name":"Write","input":{"file_path":"src/hello.txt"}}],"usage":{"input_tokens":100,"output_tokens":20}}}'
-mkdir -p src && echo "hello $AUTOCODER_TASK" > src/hello.txt
+mkdir -p src && echo "hello $AUTOCODER_TASK $(date +%s%N)" > src/hello.txt
 echo '{"type":"result","subtype":"success","result":"写好了 src/hello.txt","usage":{"input_tokens":1200,"output_tokens":300,"cache_read_input_tokens":5000,"cache_creation_input_tokens":40}}'
 `
 
@@ -70,9 +74,18 @@ func setup(t *testing.T, testCmd string) *env {
 	sf := &settings.File{Path: filepath.Join(home, "settings.json")}
 	s := settings.Default()
 	s.Assignments = []roles.Assignment{{ToolID: "fake", Roles: []roles.Role{roles.Lead, roles.Developer}}}
+	s.Review = false // 评审的用例里单独打开
 	if _, err := sf.Put(s); err != nil {
 		t.Fatal(err)
 	}
+	// 状态提交在后台进行：结束前等它们写完，临时目录才能删干净
+	t.Cleanup(func() {
+		for range 3 {
+			time.Sleep(150 * time.Millisecond)
+			p.GitMu.Lock()
+			p.GitMu.Unlock()
+		}
+	})
 	eng := &Engine{Store: store, Settings: sf, LogDir: filepath.Join(home, "logs"), Tick: 50 * time.Millisecond,
 		Tools: func(context.Context) []toolscan.Detection { return []toolscan.Detection{tool} }}
 	return &env{ctx, store, eng, p, home}

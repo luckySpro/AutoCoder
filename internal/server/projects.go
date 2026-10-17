@@ -32,6 +32,9 @@ func (s *Server) projectRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/projects/{id}/tasks/{task}", s.patchTask)
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/{action}", s.taskAction)
 	mux.HandleFunc("POST /api/projects/{id}/deliver", s.deliver)
+	mux.HandleFunc("POST /api/projects/{id}/requests", s.createRequest)
+	mux.HandleFunc("PUT /api/projects/{id}/requests/{req}/plan", s.putPlan)
+	mux.HandleFunc("POST /api/projects/{id}/requests/{req}/{action}", s.requestAction)
 
 	mux.HandleFunc("GET /api/runs", s.listRuns)
 	mux.HandleFunc("GET /api/runs/{id}/{task}/stream", s.streamRun)
@@ -160,6 +163,7 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 		TestCommand  *string   `json:"testCommand"`
 		SetupCommand *string   `json:"setupCommand"`
 		ScopeAllow   *[]string `json:"scopeAllow"`
+		TokenBudget  *int64    `json:"tokenBudget"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -177,6 +181,12 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.ScopeAllow != nil {
 			p.ScopeAllow = *body.ScopeAllow
+		}
+		if body.TokenBudget != nil {
+			if *body.TokenBudget < 0 {
+				return http.StatusUnprocessableEntity, nil, errors.New("预算不能为负数")
+			}
+			p.TokenBudget = *body.TokenBudget
 		}
 		if err := project.SaveMeta(p); err != nil {
 			return http.StatusInternalServerError, nil, err
@@ -333,6 +343,81 @@ func (s *Server) taskAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// ---------- 需求与计划 ----------
+
+func (s *Server) createRequest(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := decode(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	req, err := s.Engine.NewRequest(r.PathValue("id"), body.Text)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	s.commitProject(r.PathValue("id"), req.ID+" 新需求")
+	writeJSON(w, http.StatusCreated, req)
+}
+
+func (s *Server) putPlan(w http.ResponseWriter, r *http.Request) {
+	var plan project.Plan
+	if err := decode(r, &plan); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.Engine.UpdatePlan(r.Context(), r.PathValue("id"), r.PathValue("req"), plan); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	s.commitProject(r.PathValue("id"), r.PathValue("req")+" 修改计划")
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) requestAction(w http.ResponseWriter, r *http.Request) {
+	id, req := r.PathValue("id"), r.PathValue("req")
+	var body struct {
+		Text string `json:"text"`
+	}
+	if r.ContentLength != 0 {
+		if err := decode(r, &body); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	var err error
+	switch r.PathValue("action") {
+	case "answer":
+		err = s.Engine.Answer(id, req, body.Text)
+	case "regenerate":
+		err = s.Engine.Regenerate(id, req, body.Text)
+	case "approve":
+		err = s.Engine.ApprovePlan(id, req)
+	case "discard":
+		err = s.Engine.Discard(id, req)
+	default:
+		writeError(w, http.StatusNotFound, errors.New("未知操作"))
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	s.commitProject(id, req+" "+r.PathValue("action"))
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) commitProject(id, msg string) {
+	s.Projects.Lock()
+	p := s.Projects.Get(id)
+	s.Projects.Unlock()
+	if p != nil {
+		go s.commitState(p, msg)
+	}
+}
+
 func (s *Server) deliver(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
 	defer cancel()
@@ -430,7 +515,7 @@ func (s *Server) runLog(w http.ResponseWriter, r *http.Request) {
 	id, task := r.PathValue("id"), r.PathValue("task")
 	s.Projects.Lock()
 	p := s.Projects.Get(id)
-	known := p != nil && p.Task(task) != nil
+	known := p != nil && (p.Task(task) != nil || p.Request(task) != nil)
 	s.Projects.Unlock()
 	if !known {
 		writeError(w, http.StatusNotFound, errors.New("任务不存在"))

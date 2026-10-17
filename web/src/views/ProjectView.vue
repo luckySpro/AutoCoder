@@ -7,11 +7,12 @@ import AgentMark from '../components/AgentMark.vue'
 import BranchLanes from '../components/BranchLanes.vue'
 import Icon from '../components/Icon.vue'
 import LiveConsole from '../components/LiveConsole.vue'
+import RequestPanel from '../components/RequestPanel.vue'
 import TaskForm from '../components/TaskForm.vue'
 import { hasRun, runKey, runs } from '../live'
 import TaskGraph from '../components/TaskGraph.vue'
-import { boardColumns, sm } from '../status'
-import type { Task, TaskStatus } from '../types'
+import { boardColumns, rm, sm } from '../status'
+import type { Report, Task, TaskStatus } from '../types'
 
 const route = useRoute()
 const project = computed(() => store.projects.find((p) => p.id === route.params.id))
@@ -33,6 +34,18 @@ const columns = computed(() => {
 
 // 任务操作
 const editing = ref<'new' | Task | null>(null)
+const composing = ref(false)
+// 汇报的标签：评审结论、需求的规划结果、任务状态
+function pill(r: Report) {
+  if (r.review === 'pass') return { label: '评审通过', tone: 'ok' }
+  if (r.review === 'changes') return { label: '要求修改', tone: 'bad' }
+  if (/^R\d+$/.test(r.taskId)) return rm(r.status)
+  return sm(r.status)
+}
+const budget = computed(() => project.value?.tokenBudget ?? 0)
+const spent = computed(() => project.value?.spent ?? projectTokens.value)
+const overBudget = computed(() => budget.value > 0 && spent.value >= budget.value)
+const nearBudget = computed(() => budget.value > 0 && !overBudget.value && spent.value >= budget.value * 0.8)
 const busy = ref('')
 const notice = ref<{ text: string; bad?: boolean } | null>(null)
 async function act(label: string, f: () => Promise<unknown>, ok?: string) {
@@ -67,17 +80,22 @@ async function deliver() {
 
 // 项目设置
 const settingsOpen = ref(false)
-const ps = ref({ testCommand: '', setupCommand: '', description: '' })
+const ps = ref({ testCommand: '', setupCommand: '', description: '', budgetK: 0 })
 function openSettings() {
-  ps.value = { testCommand: project.value?.testCommand ?? '', setupCommand: project.value?.setupCommand ?? '', description: project.value?.description ?? '' }
+  ps.value = {
+    testCommand: project.value?.testCommand ?? '', setupCommand: project.value?.setupCommand ?? '', description: project.value?.description ?? '',
+    budgetK: Math.round((project.value?.tokenBudget ?? 0) / 1000),
+  }
   settingsOpen.value = true
 }
 async function saveSettings() {
   if (!project.value) return
   const id = project.value.id
   await act('settings', async () => {
-    if (store.demo) Object.assign(project.value!, ps.value)
-    else await updateProject(id, ps.value)
+    const { budgetK, ...rest } = ps.value
+    const patch = { ...rest, tokenBudget: Math.max(0, Math.round(Number(budgetK) || 0)) * 1000 }
+    if (store.demo) Object.assign(project.value!, patch)
+    else await updateProject(id, patch)
     settingsOpen.value = false
   })
 }
@@ -119,7 +137,8 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
         </div>
       </div>
       <div class="head-actions">
-      <button class="btn primary" @click="editing = 'new'"><Icon name="plus" />新建任务</button>
+      <button class="btn primary" :aria-expanded="composing" @click="composing = !composing"><Icon name="sparkle" />提需求</button>
+      <button class="btn" @click="editing = 'new'"><Icon name="plus" />新建任务</button>
       <div class="seg" role="tablist" aria-label="视图">
         <button role="tab" :aria-selected="view === 'lanes'" @click="view = 'lanes'"><Icon name="branch" :size="15" />分支泳道</button>
         <button role="tab" :aria-selected="view === 'graph'" @click="view = 'graph'">依赖图</button>
@@ -133,9 +152,13 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
       <button class="btn ghost sm" aria-label="关闭提示" @click="notice = null"><Icon name="close" /></button>
     </div>
 
-    <div v-if="waiting.length" class="panel waiting">
-      <div class="panel-head"><h2>等你处理</h2><span class="hint num">{{ waiting.length }}</span></div>
+    <div v-if="waiting.length || overBudget" class="panel waiting">
+      <div class="panel-head"><h2>等你处理</h2><span class="hint num">{{ waiting.length + (overBudget ? 1 : 0) }}</span></div>
       <ul>
+        <li v-if="overBudget">
+          <button class="linkish" @click="openSettings">Token 预算已用完</button>
+          <span class="small">已用 {{ fmtTokens(spent) }} / 预算 {{ fmtTokens(budget) }}，这个项目暂停派发。提高预算后自动继续。</span>
+        </li>
         <li v-for="t in waiting" :key="t.id">
           <button class="linkish" @click="selectedId = t.id"><b class="mono">{{ t.id }}</b> {{ t.title }}</button>
           <span class="small">{{ t.waiting || t.lastError }}</span>
@@ -145,12 +168,16 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
 
     <div class="layout">
       <div class="main">
-        <div v-if="!project.tasks.length" class="panel empty-tasks">
-          <h2>还没有任务</h2>
-          <p class="muted">每个任务交给一个 CLI 工具，在自己的分支 <code>ac/T1-…</code> 和独立的 worktree 里完成。写清验收标准和验证命令，AutoCoder 会在合并前替你跑一遍。</p>
-          <button class="btn primary" @click="editing = 'new'"><Icon name="plus" />新建第一个任务</button>
+        <RequestPanel :project="project" :composing="composing" @compose="(v) => (composing = v)" @select="(id) => (selectedId = id)" />
+        <div v-if="!project.tasks.length && !composing && !project.requests?.some((r) => r.status !== 'discarded')" class="panel empty-tasks">
+          <h2>从一句需求开始</h2>
+          <p class="muted">写下想做什么，lead 会先读仓库，再拆成一组任务：每个任务交给一个 CLI 工具，在自己的分支 <code>ac/T1-…</code> 和独立的 worktree 里完成，验证、评审通过后合并。</p>
+          <div class="row">
+            <button class="btn primary" @click="composing = true"><Icon name="sparkle" />说一句需求</button>
+            <button class="btn" @click="editing = 'new'"><Icon name="plus" />手动新建任务</button>
+          </div>
         </div>
-        <div v-else class="panel">
+        <div v-else-if="project.tasks.length" class="panel">
           <BranchLanes v-if="view === 'lanes'" :project="project" :selected="selectedId" @select="(id) => (selectedId = id)" />
           <TaskGraph v-else-if="view === 'graph'" :tasks="project.tasks" :selected="selectedId" @select="(id) => (selectedId = id)" />
           <div v-else class="board">
@@ -206,9 +233,11 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
           <h3 class="sub">汇报</h3>
           <ul class="feed compact">
             <li v-for="r in reportsOf(selected)" :key="r.id">
-              <span class="pill" :class="sm(r.status).tone">{{ sm(r.status).label }}</span>
-              <span>{{ r.summary }}</span>
+              <span class="pill" :class="pill(r).tone">{{ pill(r).label }}</span>
+              <AgentMark :id="r.from" :size="16" />
+              <span class="grow sum">{{ r.summary }}</span>
               <code v-if="r.commit" class="faint">{{ r.commit }}</code>
+              <ul v-if="r.issues?.length" class="issues"><li v-for="i in r.issues" :key="i">{{ i }}</li></ul>
             </li>
             <li v-if="!reportsOf(selected).length" class="faint">暂无汇报</li>
           </ul>
@@ -259,10 +288,12 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
           <dl v-if="!settingsOpen" class="psettings">
             <dt>测试</dt><dd class="mono small">{{ project.testCommand || '未设置' }}</dd>
             <dt>准备</dt><dd class="mono small">{{ project.setupCommand || '未设置' }}</dd>
+            <dt>预算</dt><dd class="small">{{ budget ? `${fmtTokens(budget)} token` : '不限' }}</dd>
           </dl>
           <form v-else class="psform" @submit.prevent="saveSettings">
             <label class="field">测试命令 <span class="help">合并前与交付前运行</span><input v-model.trim="ps.testCommand" class="mono" placeholder="go test ./..." /></label>
             <label class="field">环境准备 <span class="help">新建任务 worktree 后先运行</span><input v-model.trim="ps.setupCommand" class="mono" placeholder="npm ci --prefix web" /></label>
+            <label class="field">Token 预算 <span class="help">千 token；用到 80% 提醒，用完暂停派发，0 表示不限</span><input v-model.number="ps.budgetK" type="number" min="0" step="100" class="mono" /></label>
             <label class="field">项目说明<textarea v-model="ps.description" rows="2"></textarea></label>
             <div class="row"><button class="btn primary sm" :disabled="busy === 'settings'">保存</button><button type="button" class="btn sm" @click="settingsOpen = false">取消</button></div>
           </form>
@@ -270,7 +301,8 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
 
         <div class="panel">
           <div class="panel-head"><h2>Token</h2><RouterLink to="/usage" class="hint">计量明细</RouterLink></div>
-          <div class="big num">{{ fmtTokens(projectTokens) }}</div>
+          <div class="big num">{{ fmtTokens(projectTokens) }}<span v-if="budget" class="of">/ {{ fmtTokens(budget) }}</span></div>
+          <p v-if="nearBudget" class="small warn-text">已用到预算的 {{ Math.round((spent / budget) * 100) }}%</p>
           <div class="stack" aria-hidden="true">
             <span v-for="[id, n] in toolTokens" :key="id" :style="{ flex: n, background: agent(id).color }"></span>
           </div>
@@ -285,7 +317,7 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
             <li v-for="r in project.reports" :key="r.id" :style="{ '--c': agent(r.from).color }">
               <div class="row between small"><span class="row"><AgentMark :id="r.from" :size="18" /><b>{{ r.taskId === 'delivery' ? '交付' : r.taskId }}</b></span><span class="faint num">{{ r.at }}</span></div>
               <p>{{ r.summary }}</p>
-              <div class="row small"><span class="pill" :class="sm(r.status).tone">{{ sm(r.status).label }}</span><code v-if="r.commit" class="faint">{{ r.commit }}</code></div>
+              <div class="row small"><span class="pill" :class="pill(r).tone">{{ pill(r).label }}</span><code v-if="r.commit" class="faint">{{ r.commit }}</code></div>
             </li>
           </ul>
         </div>
@@ -304,7 +336,7 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
 .branch.integ { background: var(--accent-soft); color: var(--accent); }
 .gh { gap: 4px; color: var(--ink-2); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
-.main, .aside { display: grid; gap: 16px; min-width: 0; }
+.main, .aside { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(176px, 1fr); gap: 12px; overflow-x: auto; }
 .col { display: grid; gap: 8px; align-content: start; }
 .col-head { display: flex; justify-content: space-between; align-items: center; padding-bottom: 4px; }
@@ -361,5 +393,9 @@ dd { margin: 0; min-width: 0; display: flex; gap: 8px; align-items: center; flex
 .deliver { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 10px; justify-items: start; }
 .psettings { grid-template-columns: 40px minmax(0, 1fr); margin: 0; }
 .psform { display: grid; gap: 10px; }
+.sum { white-space: pre-wrap; }
+.issues { flex-basis: 100%; margin: 0; padding-left: 20px; display: grid; gap: 3px; color: var(--ink-2); }
+.of { font-size: 14px; color: var(--ink-3); margin-left: 6px; letter-spacing: 0; }
+.warn-text { color: var(--warn); margin: -4px 0 10px; }
 @media (max-width: 1180px) { .layout { grid-template-columns: 1fr; } }
 </style>

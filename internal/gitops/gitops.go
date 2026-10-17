@@ -186,6 +186,34 @@ func EnsureWorktree(ctx context.Context, repo, path, branch, base string) error 
 	return err
 }
 
+// SyncDetached 准备一个只读用途的分离 worktree，内容与 ref 完全一致（规划、评审用）。
+// 已存在时丢弃里面的任何改动再切到 ref。
+func SyncDetached(ctx context.Context, repo, path, ref string) error {
+	if _, err := os.Stat(path); err == nil {
+		if _, err := Run(ctx, path, "checkout", "--detach", "--force", ref); err == nil {
+			_, err = Run(ctx, path, "clean", "-fdq")
+			return err
+		}
+		_ = RemoveWorktree(ctx, repo, path)
+		_ = os.RemoveAll(path)
+	}
+	_, _ = Run(ctx, repo, "worktree", "prune")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	_, err := Run(ctx, repo, "worktree", "add", "--detach", path, ref)
+	return err
+}
+
+// Discard 丢弃工作区的全部未提交改动（含未跟踪文件）。
+func Discard(ctx context.Context, dir string) error {
+	if _, err := Run(ctx, dir, "reset", "--hard", "-q", "HEAD"); err != nil {
+		return err
+	}
+	_, err := Run(ctx, dir, "clean", "-fdq")
+	return err
+}
+
 // RemoveWorktree 删除 worktree（分支保留）。
 func RemoveWorktree(ctx context.Context, repo, path string) error {
 	_, err := Run(ctx, repo, "worktree", "remove", "--force", path)

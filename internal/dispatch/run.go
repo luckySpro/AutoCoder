@@ -34,7 +34,7 @@ type Stat struct {
 	Attempt      int      `json:"attempt"`
 	StartedAt    int64    `json:"startedAt"`
 	LastActivity int64    `json:"lastActivity"`
-	Phase        string   `json:"phase"` // running | verifying | integrating | done | failed | stopped
+	Phase        string   `json:"phase"` // running | verifying | reviewing | integrating | planning | done | failed | stopped | awaiting-review
 	Files        []string `json:"files"`
 	Added        int      `json:"added"`
 	Removed      int      `json:"removed"`
@@ -55,6 +55,7 @@ type Run struct {
 	cancel func(reason string)
 	stopBy string // 用户停止 / 卡住 / 超时
 	slot   int    // 运行槽编号，决定 AUTOCODER_PORT_BASE
+	author string // 写代码的工具（评审改写 stat.Tool 后仍要知道）
 }
 
 func newRun(st Stat) *Run {
@@ -78,7 +79,7 @@ func (r *Run) Active() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch r.stat.Phase {
-	case "running", "verifying", "integrating":
+	case "running", "verifying", "integrating", "planning", "reviewing":
 		return true
 	}
 	return false
