@@ -54,6 +54,7 @@ export const store = reactive({
   demo: false,
   scannedAt: '',
   manifestPath: '',
+  searchPath: [] as string[], // 检测时查找命令的目录
   tools: [] as ToolDetection[],
   roles: [] as RoleInfo[],
   assignments: [] as Assignment[],
@@ -67,12 +68,13 @@ export const store = reactive({
   settings: loadJSON<Settings>(SETTINGS_KEY) ?? { ...DEFAULT_SETTINGS },
 })
 
-type ToolsResp = { tools: ToolDetection[]; scannedAt: string; manifestPath: string }
+type ToolsResp = { tools: ToolDetection[]; scannedAt: string; manifestPath: string; searchPath?: string[] }
 
 function applyTools(t: ToolsResp) {
   store.tools = t.tools
   store.scannedAt = t.scannedAt
   store.manifestPath = t.manifestPath
+  store.searchPath = t.searchPath ?? []
 }
 
 export async function scanTools(rescan = false) {

@@ -94,6 +94,12 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
 
     <div v-for="g in groups" :key="g.key" class="group" v-show="g.tools.length || g.key === 'ready'">
       <div class="group-head"><h2>{{ g.title }} <span class="faint num">{{ g.tools.length }}</span></h2><span class="faint small">{{ g.hint }}</span></div>
+      <details v-if="g.key === 'missing'" class="notfound small">
+        <summary>已经装了，这里却显示未安装？</summary>
+        <p class="muted">在终端运行 <code>which codex</code>（换成对应命令）看它装在哪。点该工具的“编辑”，把命令改成这个完整路径，保存后会立即重新检测。</p>
+        <p class="muted">AutoCoder 在这些目录里找命令：</p>
+        <ul class="mono faint"><li v-for="d in store.searchPath" :key="d">{{ d }}</li></ul>
+      </details>
       <p v-if="!g.tools.length" class="panel muted">还没有可派发的工具。安装 Claude Code、Codex 等 CLI 后点"重新检测"，或点"添加工具"登记其他工具。</p>
       <div class="rows">
         <article v-for="t in g.tools" :key="t.id" class="tool" :class="{ off: t.disabled }">
@@ -212,4 +218,7 @@ a.btn.disabled { opacity: 0.5; pointer-events: none; }
   .use, .state, .ops { grid-column: 2; }
   .use { grid-auto-flow: column; justify-content: start; gap: 14px; }
 }
+.notfound { margin: 0 0 10px; }
+.notfound summary { cursor: pointer; }
+.notfound ul { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; word-break: break-all; }
 </style>
