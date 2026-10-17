@@ -1,7 +1,7 @@
-// Package tray 是菜单栏（托盘）图标：显示运行状态、等你处理的事和今天的用量。
+// Package tray 生成菜单栏（托盘）图标的内容：运行状态、等你处理的事和今天的用量。
 //
-// menu.go 和 icon.go 不依赖系统托盘库，可以在任何构建里测试；
-// 真正画到菜单栏的代码在 systray.go，只在带 tray 标签的桌面版里编译。
+// 这里只生成菜单文字和图标图片；真正画到菜单栏的是桌面外壳（desktop/src-tauri，Rust），
+// 它通过 /api/desktop/menu 和 /api/desktop/icon.png 取这些内容。
 package tray
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/luckySpro/AutoCoder/internal/server"
 )
 
-// 菜单里预留的行数：系统托盘菜单项不能删除，只能显示或隐藏。
+// 菜单里最多列出的行数。
 const (
 	MaxRunning = 5
 	MaxWaiting = 5
@@ -21,24 +21,25 @@ const (
 
 // Item 是一行可点击的菜单项，点开界面里对应的页面。
 type Item struct {
-	Text string
-	Link string
+	Text string `json:"text"`
+	Link string `json:"link"`
 }
 
 // Menu 是某一时刻菜单的全部内容。
 type Menu struct {
-	Title      string // 图标旁的文字（macOS 菜单栏显示）：运行中的数量
-	Tooltip    string
-	Header     string
-	Running    []Item
-	WaitHeader string
-	Waiting    []Item
-	More       string // 等你处理的还有几件没列出
-	Usage      string
-	Tools      []string
-	Pause      string // 暂停或恢复派发
-	Quit       string
-	Icon       IconState
+	Title      string    `json:"title"` // 图标旁的文字（macOS 菜单栏显示）：运行中的数量
+	Tooltip    string    `json:"tooltip"`
+	Header     string    `json:"header"`
+	Running    []Item    `json:"running"`
+	WaitHeader string    `json:"waitHeader"`
+	Waiting    []Item    `json:"waiting"`
+	More       string    `json:"more"` // 等你处理的还有几件没列出
+	Usage      string    `json:"usage"`
+	Tools      []string  `json:"tools"`
+	Pause      string    `json:"pause"` // 暂停或恢复派发
+	Paused     bool      `json:"paused"`
+	Quit       string    `json:"quit"`
+	Icon       IconState `json:"icon"`
 }
 
 var phases = map[string]string{
@@ -48,7 +49,7 @@ var phases = map[string]string{
 // Build 由整体状态生成菜单；base 是界面地址，例如 http://127.0.0.1:7788。
 func Build(s server.Summary, base string) Menu {
 	n := len(s.Running)
-	m := Menu{Icon: IconState{Slots: max(s.Slots, 1), Busy: n, Waiting: len(s.Waiting) > 0, Paused: s.Paused}}
+	m := Menu{Running: []Item{}, Waiting: []Item{}, Tools: []string{}, Paused: s.Paused, Icon: IconState{Slots: max(s.Slots, 1), Busy: n, Waiting: len(s.Waiting) > 0, Paused: s.Paused}}
 	switch {
 	case s.Paused && n > 0:
 		m.Header = fmt.Sprintf("已暂停派发，还有 %d 个在收尾", n)

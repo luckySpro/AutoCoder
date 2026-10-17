@@ -168,7 +168,7 @@ async function save() {
           </label>
         </div>
       </div>
-      <p v-if="store.desktop" class="muted small">关掉浏览器后 AutoCoder 仍在后台运行，任务照常派发。点菜单栏图标查看运行状态、等你处理的事和今天的用量，或者退出。</p>
+      <p v-if="store.desktop" class="muted small">关掉窗口后 AutoCoder 仍在后台运行，任务照常派发。点菜单栏图标查看运行状态、等你处理的事和今天的用量，或者退出。</p>
       <p v-if="saveError" class="error" role="alert">{{ saveError }}</p>
     </template>
   </section>

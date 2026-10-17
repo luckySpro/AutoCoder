@@ -1,0 +1,3 @@
+# 构建时放入 Go 引擎：autocoder-engine-<目标三元组>[.exe]，见 desktop/README.md
+*
+!.gitignore

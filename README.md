@@ -19,29 +19,38 @@
 - ✅ 合并前评审：评审工具只读审阅 diff 与验收标准，要求修改时带着问题清单重试；尽量不让作者自审
 - ✅ 冲突连续 2 次没能自动解决、token 预算用完时转给你处理
 - ✅ 工具清单显示每个工具今天和累计的用量、调用次数、正在做的任务
-- ✅ 桌面版：菜单栏图标显示运行状态、等你处理的事和今日用量，可暂停派发；关掉浏览器后在后台运行，从菜单栏退出；退出时正在运行的任务保存进度，下次启动继续（`internal/tray`，见设计文档 §8.1）
+- ✅ 桌面版（Rust + Tauri 2 外壳，内置 Go 引擎）：自己的窗口；菜单栏图标显示运行状态、等你处理的事和今日用量，可暂停派发；关掉窗口后在后台运行，从菜单栏退出；退出时正在运行的任务保存进度，下次启动继续（`desktop/`，见设计文档 §8.1）
 - ⏳ 补测试子任务、受阻任务交给 lead 拆分改派、仓库锁与日志清理（见设计文档 §10.1）
 
 > 各工具的无人值守参数随版本变化，内置默认值按常见版本填写。第一次用某个工具前，建议在「工具清单」里核对它的参数。
 
 ## 快速开始
 
-需要 Go 1.24+、Node 20+。
+需要 Go 1.24+、Node 20+；桌面版另外需要 Rust（stable）和 [Tauri 的系统依赖](https://v2.tauri.app/start/prerequisites/)。
 
 ```bash
 make build          # 命令行版：构建前端并打进单文件 bin/autocoder
 ./bin/autocoder     # 打开 http://127.0.0.1:7788
 ./bin/autocoder tools   # 只在终端里做工具检测
 
-make desktop        # 桌面版（带菜单栏图标）：bin/autocoder-desktop；macOS 上需要 Xcode 命令行工具
+make desktop        # 当前平台的桌面版安装包：desktop/src-tauri/target/<目标>/release/bundle/
 ```
 
 两种版本的区别：
 
-- **桌面版**：双击打开后自动打开浏览器，菜单栏出现图标。关掉浏览器后 AutoCoder 仍在后台运行、照常派发；点图标可以看运行中的任务、等你处理的事和今天的用量，暂停派发或退出。日志在 `~/.autocoder/autocoder.log`。
+- **桌面版**：双击打开后在自己的窗口里显示界面，菜单栏出现图标。关掉窗口后 AutoCoder 仍在后台运行、照常派发；点图标可以看运行中的任务、等你处理的事和今天的用量，暂停派发或退出。日志在 `~/.autocoder/autocoder.log`。
 - **命令行版**：不带图标，任何平台都能交叉编译，适合服务器或习惯用终端的情况，Ctrl+C 退出。
 
-推送 `v*` 标签，或在 Actions 页面手动运行 Release 并填版本号，GitHub Actions 会构建全部产物并发布：命令行版 6 个平台、Linux 和 Windows 桌面版、macOS 的 `AutoCoder.dmg` 安装包和 `AutoCoder.app` 压缩包（Intel 与 Apple 芯片通用）。
+推送 `v*` 标签，或在 Actions 页面手动运行 Release 并填版本号，GitHub Actions 会构建全部产物并发布：
+
+| 系统 | 文件 | 安装 |
+|---|---|---|
+| macOS Apple 芯片 / Intel | `AutoCoder_<版本>_aarch64.dmg` / `AutoCoder_<版本>_x64.dmg` | 打开 dmg，把 AutoCoder 拖进「应用程序」；还没有苹果签名，第一次在「应用程序」里右键 AutoCoder 选「打开」 |
+| Windows x64 | `AutoCoder_<版本>_x64-setup.exe` 或 `.msi` | 双击安装；内置 WebView2，没有网络也能装 |
+| Linux x64 | `.AppImage` 或 `.deb` | AppImage 加执行权限直接运行；deb 用 `sudo apt install ./文件名.deb` |
+| 命令行版 | `autocoder-cli-<系统>-<架构>` | 6 个平台的单文件，直接运行 |
+
+全部文件的校验值在 `SHA256SUMS.txt`。
 
 前端开发：
 

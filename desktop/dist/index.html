@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoCoder</title>
+<style>
+  :root { --bg: #f4f1ea; --fg: #1d1b17; --muted: #6b665c; --accent: #d6401f; --line: #d9d3c4; color-scheme: light }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1b1a17; --fg: #ece7da; --muted: #a39d90; --accent: #ef6a48; --line: #36332d; color-scheme: dark } }
+  html, body { height: 100%; margin: 0 }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+         display: grid; place-items: center; padding: 0 16px }
+  main { max-width: 34rem; display: grid; gap: 12px; text-align: center }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .02em }
+  .bars { display: flex; gap: 6px; justify-content: center }
+  .bars i { width: 10px; height: 26px; border-radius: 3px; border: 2px solid var(--fg); animation: pulse 1.2s ease-in-out infinite }
+  .bars i:nth-child(2) { animation-delay: .2s } .bars i:nth-child(3) { animation-delay: .4s }
+  @keyframes pulse { 50% { background: var(--fg) } }
+  p { margin: 0; color: var(--muted) }
+  .err { display: none; text-align: left; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px }
+  .err b { color: var(--accent) }
+  pre { white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; color: var(--muted) }
+  body.failed .bars, body.failed #wait { display: none } body.failed .err { display: block }
+</style>
+</head>
+<body>
+<main>
+  <div class="bars"><i></i><i></i><i></i></div>
+  <h1>AutoCoder</h1>
+  <p id="wait">正在启动，第一次会检测本机的开发工具…</p>
+  <div class="err"><b>AutoCoder 没能启动</b><pre id="msg"></pre></div>
+</main>
+<script>
+  // 外壳在启动失败时把原因放在地址的 #error= 后面
+  const m = location.hash.match(/^#error=(.*)$/)
+  if (m) { document.body.classList.add('failed'); document.getElementById('msg').textContent = decodeURIComponent(m[1]) }
+</script>
+</body>
+</html>
