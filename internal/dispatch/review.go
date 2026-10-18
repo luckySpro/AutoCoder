@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,9 +57,61 @@ func chooseReviewer(tools []toolscan.Detection, assigns []roles.Assignment, busy
 }
 
 type verdict struct {
-	Verdict string   `json:"verdict"`
-	Summary string   `json:"summary"`
-	Issues  []string `json:"issues"`
+	Verdict string    `json:"verdict"`
+	Summary string    `json:"summary"`
+	Issues  issueList `json:"issues"`
+}
+
+// issueList 接受字符串数组，也接受对象数组：评审工具常写成
+// {"severity": "info", "issue": "…"}，以前这种写法会被当成"没有结论"反复重评。
+type issueList []string
+
+func (l *issueList) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		var one string
+		if json.Unmarshal(data, &one) == nil { // 单个字符串
+			*l = issueList{one}
+			return nil
+		}
+		if string(data) == "null" {
+			*l = nil
+			return nil
+		}
+		return err
+	}
+	out := make(issueList, 0, len(raw))
+	for _, r := range raw {
+		var s string
+		if json.Unmarshal(r, &s) == nil {
+			out = append(out, s)
+			continue
+		}
+		var m map[string]any
+		if json.Unmarshal(r, &m) != nil {
+			continue
+		}
+		text := ""
+		for _, k := range []string{"issue", "description", "message", "text", "detail", "problem", "summary", "title"} {
+			if v, ok := m[k].(string); ok && strings.TrimSpace(v) != "" {
+				text = strings.TrimSpace(v)
+				break
+			}
+		}
+		if text == "" {
+			b, _ := json.Marshal(m)
+			text = string(b)
+		}
+		if f, ok := m["file"].(string); ok && f != "" && !strings.Contains(text, f) {
+			text = f + "：" + text
+		}
+		if sev, ok := m["severity"].(string); ok && sev != "" {
+			text = "[" + sev + "] " + text
+		}
+		out = append(out, text)
+	}
+	*l = out
+	return nil
 }
 
 // parseVerdict 读出评审结论：pass 或 changes。
