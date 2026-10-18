@@ -28,6 +28,7 @@ func buildPrompt(p *project.Project, t *project.Task, deps []project.Report, con
 		if p.TestCommand != "" {
 			fmt.Fprintf(&b, "- `%s`（项目测试）\n", p.TestCommand)
 		}
+		b.WriteString("请先自己运行这些命令确认通过。缺依赖或命令（如 command not found）时自己安装（npm install 等），并把新依赖写进依赖清单，不要留给别人处理。\n")
 	}
 	if len(t.Scope) > 0 {
 		fmt.Fprintf(&b, "\n## 修改范围\n只修改这些路径：%s\n", strings.Join(t.Scope, "、"))
@@ -41,7 +42,7 @@ func buildPrompt(p *project.Project, t *project.Task, deps []project.Report, con
 	if len(conflicts) > 0 {
 		fmt.Fprintf(&b, "\n## 先解决合并冲突\n集成分支的最新改动已合入你的分支，以下文件有冲突标记（<<<<<<< / >>>>>>>），请先保留双方意图解决冲突：%s\n", strings.Join(conflicts, "、"))
 	}
-	if t.Attempts > 1 && t.LastError != "" {
+	if (t.Attempts > 1 || len(t.Avoid) > 0) && t.LastError != "" {
 		fmt.Fprintf(&b, "\n## 上一次尝试没有通过\n这是第 %d 次尝试。上次的问题：\n%s\n请在已有改动的基础上修正。\n", t.Attempts, clip(t.LastError, 3000))
 	}
 	b.WriteString(`

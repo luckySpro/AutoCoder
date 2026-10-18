@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ case "$FAKE_MODE" in
   scope) echo "x" > outside.txt;;
   twice) if [ ! -f "$FAKE_MARK" ]; then touch "$FAKE_MARK"; mkdir -p src && echo done > src/hello.txt; echo "崩了" >&2; exit 3; fi
          echo '{"type":"result","result":"之前已经写好，检查通过，不需要改动。","usage":{"input_tokens":10,"output_tokens":5}}'; exit 0;;
+  deps)  mkdir -p src && echo hi > src/hello.txt && echo '{"name":"x"}' > package.json;;
   slow)  echo "{\"type\":\"system\",\"subtype\":\"init\"}"; sleep 30;;
 esac
 echo '{"type":"system","subtype":"init","model":"fake-1"}'
@@ -365,5 +367,60 @@ func TestArgErrorDoesNotCountAttempt(t *testing.T) {
 	}
 	if st := e.eng.ToolState()["fake"]; st == "" {
 		t.Fatal("工具应暂停")
+	}
+}
+
+// 工具改了依赖清单：验证前先重新安装依赖（上一轮装的 node_modules 里没有新加的包）。
+func TestDepsReinstalledWhenManifestChanges(t *testing.T) {
+	t.Setenv("FAKE_MODE", "deps")
+	log := filepath.Join(t.TempDir(), "setup.log")
+	t.Setenv("SETUP_LOG", log)
+	e := setup(t, "")
+	e.store.Lock()
+	e.p.SetupCommand = `echo run >> "$SETUP_LOG"`
+	e.store.Unlock()
+	id := e.addTask(t, project.Task{Title: "加依赖", Verify: []string{"true"}})
+	task := e.waitStatus(t, id, project.Merged, project.Blocked)
+	data, _ := os.ReadFile(log)
+	if task.Status != project.Merged || strings.Count(string(data), "run") != 2 {
+		t.Fatalf("新建时装一次、清单变化后再装一次：%q %+v", data, task)
+	}
+}
+
+// 验证报"command not found"：重新安装依赖后再跑一次，不算这次尝试失败。
+func TestMissingCommandReinstallsAndRetries(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "setup.log")
+	t.Setenv("SETUP_LOG", log)
+	e := setup(t, "")
+	e.store.Lock()
+	e.p.SetupCommand = `echo run >> "$SETUP_LOG"; [ "$(wc -l < "$SETUP_LOG")" -ge 2 ] && touch "$SETUP_LOG.ok"; true`
+	e.store.Unlock()
+	id := e.addTask(t, project.Task{Title: "缺命令", Verify: []string{`test -f "$SETUP_LOG.ok" || { echo "sh: vitest: command not found"; exit 127; }`}})
+	task := e.waitStatus(t, id, project.Merged, project.Blocked)
+	if task.Status != project.Merged || task.Attempts != 1 {
+		t.Fatalf("%+v", task)
+	}
+}
+
+// 一个工具用完尝试次数后，换另一个工具从头再试，而不是直接受阻。
+func TestSwitchesToolAfterAttemptsUsedUp(t *testing.T) {
+	e := setup(t, "")
+	first := e.eng.Tools(e.ctx)[0]
+	wrapper := filepath.Join(t.TempDir(), "fake2")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\necho ok > done2.txt\nexec \""+first.Path+"\" \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.ID, second.Name, second.Path = "fake2", "Fake2", wrapper
+	e.eng.Tools = func(context.Context) []toolscan.Detection { return []toolscan.Detection{first, second} }
+	st := e.eng.Settings.Get()
+	st.Assignments = append(st.Assignments, roles.Assignment{ToolID: "fake2", Roles: []roles.Role{roles.Developer}})
+	if _, err := e.eng.Settings.Put(st); err != nil {
+		t.Fatal(err)
+	}
+	id := e.addTask(t, project.Task{Title: "换人", Verify: []string{"test -f done2.txt"}})
+	task := e.waitStatus(t, id, project.Merged, project.Blocked)
+	if task.Status != project.Merged || task.Tool != "fake2" || !slices.Equal(task.Avoid, []string{"fake"}) {
+		t.Fatalf("%+v", task)
 	}
 }

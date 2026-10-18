@@ -83,8 +83,11 @@ type Task struct {
 	// ConflictFails 是连续合并冲突的次数，达到 2 次转给你（§6.6）。
 	ConflictFails int `yaml:"conflict_fails,omitempty" json:"conflictFails,omitempty"`
 	// ReviewTries 是评审结论无法解析时已重跑的次数。
-	ReviewTries int       `yaml:"review_tries,omitempty" json:"-"`
-	UpdatedAt   time.Time `yaml:"updated_at" json:"updatedAt"`
+	ReviewTries int `yaml:"review_tries,omitempty" json:"-"`
+	// Tool 是最近一次尝试用的工具；Avoid 是已经用完尝试次数的工具，换别的工具接着做。
+	Tool      string    `yaml:"tool,omitempty" json:"tool,omitempty"`
+	Avoid     []string  `yaml:"avoid,omitempty" json:"avoid,omitempty"`
+	UpdatedAt time.Time `yaml:"updated_at" json:"updatedAt"`
 }
 
 // Report 是一次尝试结束后由编排器写下的汇报，追加在 .autocoder/reports/<任务>.md。
