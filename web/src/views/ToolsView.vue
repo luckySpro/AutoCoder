@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { fmtTokens, importTools, removeTool, saveTool, scanTools, specOf, store, strengthName, todayKey, totalTokens } from '../api'
+import { fmtTokens, importTools, removeTool, saveTool, scanTools, specOf, store, strengthName, todayKey, totalTokens, updateManifest } from '../api'
 import AgentMark from '../components/AgentMark.vue'
 import Icon from '../components/Icon.vue'
 import ToolEditor from '../components/ToolEditor.vue'
@@ -37,6 +37,24 @@ async function setAccess(t: ToolDetection, access: string) {
   flash(access === 'standard' ? `${t.name} 改为只改文件，命令要批准` : `${t.name} 改为最高权限`)
 }
 const accessOf = (t: ToolDetection) => (t.access === 'standard' || !t.fullArgs?.length ? 'standard' : 'full')
+
+// 拉取在线清单：CLI 升级改了参数时不用等 AutoCoder 发新版本
+const updating = ref(false)
+async function checkArgs() {
+  updating.value = true
+  try {
+    const r = await updateManifest()
+    const issues = store.tools.filter((t) => t.installed && t.argIssues?.length).length
+    if (r?.error) flash(`在线清单获取失败：${r.error}`)
+    else if (r?.changed) flash(issues ? `参数已更新，仍有 ${issues} 个工具的参数不被当前版本认识` : '参数已更新到最新清单')
+    else flash(issues ? `清单已是最新，${issues} 个工具的参数不被当前版本认识，可以点编辑修改` : '清单已是最新，参数都能被当前版本识别')
+  } catch (e) {
+    flash((e as Error).message)
+  } finally {
+    updating.value = false
+  }
+}
+const remoteAt = computed(() => (store.remote?.checkedAt ? new Date(store.remote.checkedAt).toLocaleString('zh-CN', { hour12: false }) : ''))
 
 async function remove(t: ToolDetection) {
   if (confirmId.value !== t.id) {
@@ -93,6 +111,7 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
       </div>
       <div class="actions">
         <button class="btn" :disabled="store.loading" @click="scanTools(true)"><Icon name="refresh" />{{ store.loading ? '检测中…' : '重新检测' }}</button>
+        <button class="btn" :disabled="updating || store.demo" title="从网上拉取各 CLI 最新的派发参数，并核对本机版本" @click="checkArgs"><Icon name="refresh" />{{ updating ? '检查中…' : '检查参数更新' }}</button>
         <button class="btn" @click="importing = true"><Icon name="upload" />导入</button>
         <a class="btn" :class="{ disabled: store.demo }" :href="store.demo ? undefined : '/api/tools/export'" :aria-disabled="store.demo" download><Icon name="download" />导出</a>
         <button class="btn primary" @click="creating = true"><Icon name="plus" />添加工具</button>
@@ -125,6 +144,9 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
               <span v-if="t.usageArgs?.length" class="pill ok">精确用量</span>
               <span v-else class="pill warn" title="不输出 token 用量，按字符数估算">估算用量</span>
               <span v-if="!t.headless?.length" class="pill bad">缺少调用参数</span>
+              <span v-if="t.installed && t.argIssues?.length" class="pill bad" :title="`当前安装的 v${t.version || '?'} 帮助里找不到这些参数，派发可能失败。点「检查参数更新」，或点编辑修改`">
+                当前版本不认识 {{ t.argIssues.join(' ') }}
+              </span>
             </div>
           </div>
           <div class="use" :aria-label="`${t.name} 的用量`">
@@ -165,7 +187,8 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
       </div>
     </div>
 
-    <p class="faint small wrap">清单保存在 <code>{{ store.manifestPath }}</code>，只记录你改动过或新增的条目；内置条目随版本更新。</p>
+    <p class="faint small wrap">清单保存在 <code>{{ store.manifestPath }}</code>，只记录你改动过或新增的条目；内置条目随版本更新。
+      各 CLI 的派发参数还会每 6 小时从在线清单自动更新<template v-if="remoteAt">（上次检查 {{ remoteAt }}<template v-if="store.remote?.error">，失败：{{ store.remote.error }}</template>）</template>，你自己改过的参数不会被覆盖。</p>
 
     <ToolEditor v-if="creating || editing" :tool="editing ?? undefined" @close="creating = false; editing = null" />
 

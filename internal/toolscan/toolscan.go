@@ -29,8 +29,10 @@ type Tool struct {
 	Commands    []string            `yaml:"commands" json:"commands"`
 	Paths       map[string][]string `yaml:"paths" json:"paths,omitempty"`
 	VersionArgs []string            `yaml:"version_args" json:"versionArgs,omitempty"`
-	Headless    []string            `yaml:"headless" json:"headless,omitempty"`
-	UsageArgs   []string            `yaml:"usage_args" json:"usageArgs,omitempty"`
+	// HelpArgs 输出帮助文本，用来核对当前安装版本是否还认识清单里的参数。
+	HelpArgs  []string `yaml:"help_args,omitempty" json:"helpArgs,omitempty"`
+	Headless  []string `yaml:"headless" json:"headless,omitempty"`
+	UsageArgs []string `yaml:"usage_args" json:"usageArgs,omitempty"`
 	// 无人值守派发用的参数（见 DESIGN §6.3），都可以在界面上编辑。
 	AutoArgs []string `yaml:"auto_args,omitempty" json:"autoArgs,omitempty"` // 免确认、限定在工作目录内修改
 	FullArgs []string `yaml:"full_args,omitempty" json:"fullArgs,omitempty"` // 最高权限：直接执行命令、联网，不再询问
@@ -59,6 +61,8 @@ type Detection struct {
 	Path      string `json:"path,omitempty"`
 	Version   string `json:"version,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// ArgIssues 是当前版本的帮助里找不到的参数（参数可能已改名或移除）。
+	ArgIssues []string `json:"argIssues,omitempty"`
 }
 
 // Schedulable 表示该工具能否被编排器派发任务（已安装且有非交互调用模板）。
@@ -126,12 +130,78 @@ func Builtin() Manifest {
 }
 
 // LoadManifest 读取内置清单，并按 id 合并用户清单（userPath 为空或不存在时忽略）。
+// 有在线清单缓存（tools.remote.yaml）时，先用它更新内置条目的参数。
 func LoadManifest(userPath string) (Manifest, error) {
+	builtin := Builtin()
+	base := applyRemote(builtin, readRemote(RemotePath(userPath)))
 	user, err := ReadUserManifest(userPath)
 	if err != nil {
-		return Builtin(), err
+		return base, err
 	}
-	return Merge(Builtin(), user), nil
+	return Merge(base, followRemote(user, builtin, base)), nil
+}
+
+// followRemote：用户只改了权限、启用等设置、没动参数时，参数跟着在线清单走；
+// 用户自己改过的参数保持不变。
+func followRemote(user, builtin, base Manifest) Manifest {
+	out := Manifest{Tools: append([]Tool(nil), user.Tools...)}
+	for i := range out.Tools {
+		e, b := find(builtin, out.Tools[i].ID), find(base, out.Tools[i].ID)
+		if e == nil || b == nil {
+			continue
+		}
+		uf, ef, bf := argFields(&out.Tools[i]), argFields(e), argFields(b)
+		for k := range uf {
+			if sameArgs(*uf[k], *ef[k]) {
+				*uf[k] = append([]string(nil), *bf[k]...)
+			}
+		}
+	}
+	return out
+}
+
+// ForSave 在写入用户清单前调用：和当前生效的（在线）参数相同的字段记成内置值，
+// 这样以后在线清单再更新时，这些参数还能继续跟着更新。
+func ForSave(t Tool, userPath string) Tool {
+	builtin := Builtin()
+	base := applyRemote(builtin, readRemote(RemotePath(userPath)))
+	e, b := find(builtin, t.ID), find(base, t.ID)
+	if e == nil || b == nil {
+		return t
+	}
+	tf, ef, bf := argFields(&t), argFields(e), argFields(b)
+	for k := range tf {
+		if sameArgs(*tf[k], *bf[k]) {
+			*tf[k] = append([]string(nil), *ef[k]...)
+		}
+	}
+	return t
+}
+
+func find(m Manifest, id string) *Tool {
+	for i := range m.Tools {
+		if m.Tools[i].ID == id {
+			return &m.Tools[i]
+		}
+	}
+	return nil
+}
+
+func argFields(t *Tool) []*[]string {
+	return []*[]string{&t.VersionArgs, &t.HelpArgs, &t.Headless, &t.UsageArgs, &t.AutoArgs, &t.FullArgs,
+		&t.StreamArgs, &t.ReadonlyArgs, &t.AuthErrors, &t.LimitErrors}
+}
+
+func sameArgs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Merge 以 id 为键，用 override 中的条目替换或追加到 base，并标记来源。
@@ -173,6 +243,7 @@ type Scanner struct {
 	LookPath   func(string) (string, error)
 	Stat       func(string) (os.FileInfo, error)
 	RunVersion func(ctx context.Context, path string, args []string) (string, error)
+	RunHelp    func(ctx context.Context, path string, args []string) (string, error)
 	Timeout    time.Duration
 }
 
@@ -183,6 +254,7 @@ func NewScanner() *Scanner {
 		LookPath:   exec.LookPath,
 		Stat:       os.Stat,
 		RunVersion: runVersion,
+		RunHelp:    runHelp,
 		Timeout:    5 * time.Second,
 	}
 }
@@ -235,7 +307,58 @@ func (s *Scanner) detect(ctx context.Context, t Tool) Detection {
 			d.Version = ParseVersion(v)
 		}
 	}
+	if d.Installed && len(t.HelpArgs) > 0 && s.RunHelp != nil {
+		hctx, cancel := context.WithTimeout(ctx, s.Timeout)
+		defer cancel()
+		if help, err := s.RunHelp(hctx, d.Path, t.HelpArgs); err == nil {
+			d.ArgIssues = UnknownFlags(t, help)
+		}
+	}
 	return d
+}
+
+var flagRe = regexp.MustCompile(`(?:^|[\s,\[(|])(--?[A-Za-z][A-Za-z0-9-]*)`)
+
+// UnknownFlags 返回派发时会用到、但帮助文本里没有出现的参数。
+// 帮助文本为空或几乎没有参数时不判断，避免误报。
+func UnknownFlags(t Tool, help string) []string {
+	known := map[string]bool{}
+	for _, m := range flagRe.FindAllStringSubmatch(help, -1) {
+		known[m[1]] = true
+	}
+	if len(known) < 3 {
+		return nil
+	}
+	perm := t.AutoArgs
+	if t.FullAccess() {
+		perm = t.FullArgs
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, set := range [][]string{t.Headless, perm, t.ReadonlyArgs, t.StreamArgs, t.UsageArgs} {
+		for _, a := range set {
+			if !strings.HasPrefix(a, "-") || a == "-" || a == "--" {
+				continue
+			}
+			name, _, _ := strings.Cut(a, "=")
+			if !known[name] && !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
+func runHelp(ctx context.Context, path string, args []string) (string, error) {
+	out, err := exec.CommandContext(ctx, path, args...).CombinedOutput()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("获取帮助超时")
+	}
+	if len(out) == 0 && err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 func runVersion(ctx context.Context, path string, args []string) (string, error) {

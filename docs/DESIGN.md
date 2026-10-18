@@ -76,6 +76,9 @@ AutoCoder 的目标：**把本机的多个开发工具组织成一个小团队**
 
 - 内置清单：`internal/toolscan/tools.yaml`，只收录 CLI 工具：Claude Code、Codex CLI、Cursor Agent CLI、Gemini CLI、Qwen Code、GitHub Copilot CLI、OpenCode、Aider。
 - 用户清单：`~/.autocoder/tools.yaml`，按 `id` 覆盖或追加；`disabled: true` 可排除不想参与协同的工具。
+- 在线清单：CLI 升级常会改名或删掉参数，所以派发参数不只随 AutoCoder 版本发布。启动时与每 6 小时从仓库 main 分支拉一次 `internal/toolscan/tools.yaml`，缓存到 `~/.autocoder/tools.remote.yaml`；它只更新已有内置条目的参数与报错关键字，不改命令、名称，也不新增工具。用户清单里和内置值相同的参数跟着在线清单走，用户自己改过的参数不动。工具清单页的「检查参数更新」立即拉取一次。
+- 参数自检：配了 `help_args` 的工具在检测时读一次帮助，派发要用的参数在帮助里找不到时标为"当前版本不认识"。
+- 运行时：工具开头输出"unexpected argument / unknown option"之类并很快退出时，判为参数不兼容：不算任务的尝试次数，工具暂停、任务改派，同时拉一次在线清单并重新检测。
 - **用户不需要编辑这个文件。** 工具清单页可以添加、编辑、停用/启用、删除（内置工具则是恢复默认）、导入和导出，保存后立即重新检测。文件只是界面的存储格式：写入时先写临时文件再原子替换，并保留 `.bak`；每个条目都会校验（id 格式、命令名不含路径分隔符、headless 模板必须含 `{prompt}`、能力评分 0–100、擅长方向取值）。
 - 每个工具标注来源：`builtin`（内置未改）、`modified`（覆盖了内置）、`custom`（用户新增）。
 

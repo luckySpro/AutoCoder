@@ -17,6 +17,7 @@ export interface ToolSpec {
   commands: string[]
   paths?: Record<string, string[]>
   versionArgs?: string[]
+  helpArgs?: string[] // 输出帮助文本，用来核对当前版本是否还认识派发参数
   headless?: string[]
   usageArgs?: string[] // 有值表示能输出精确的 token 用量
   autoArgs?: string[] // 无人值守：免确认、限定在工作目录内修改（权限选「只改文件」时使用）
@@ -37,6 +38,15 @@ export interface ToolDetection extends ToolSpec {
   path?: string
   version?: string
   error?: string
+  argIssues?: string[] // 当前安装的版本帮助里找不到的参数
+}
+
+// 在线工具清单：CLI 参数随版本变化时自动更新
+export interface RemoteManifest {
+  enabled: boolean
+  changed: boolean
+  error: string
+  checkedAt?: string
 }
 
 export interface Assignment {
