@@ -7,6 +7,7 @@ import AgentMark from '../components/AgentMark.vue'
 import BranchLanes from '../components/BranchLanes.vue'
 import Icon from '../components/Icon.vue'
 import LiveConsole from '../components/LiveConsole.vue'
+import ReportText from '../components/ReportText.vue'
 import RequestPanel from '../components/RequestPanel.vue'
 import TaskForm from '../components/TaskForm.vue'
 import { hasRun, runKey, runs } from '../live'
@@ -285,7 +286,7 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
             <li v-for="r in reportsOf(selected)" :key="r.id">
               <span class="pill" :class="pill(r).tone">{{ pill(r).label }}</span>
               <AgentMark :id="r.from" :size="16" />
-              <span class="grow sum">{{ r.summary }}</span>
+              <ReportText class="grow sum" :text="r.summary" :lines="2" />
               <code v-if="r.commit" class="faint">{{ r.commit }}</code>
               <ul v-if="r.issues?.length" class="issues"><li v-for="i in r.issues" :key="i">{{ i }}</li></ul>
             </li>
@@ -366,7 +367,7 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
           <ul class="feed">
             <li v-for="r in project.reports" :key="r.id" :style="{ '--c': agent(r.from).color }">
               <div class="row between small"><span class="row"><AgentMark :id="r.from" :size="18" /><b>{{ r.taskId === 'delivery' ? '交付' : r.taskId }}</b></span><span class="faint num">{{ r.at }}</span></div>
-              <p>{{ r.summary }}</p>
+              <ReportText :text="r.summary" />
               <div class="row small"><span class="pill" :class="pill(r).tone">{{ pill(r).label }}</span><code v-if="r.commit" class="faint">{{ r.commit }}</code></div>
             </li>
           </ul>
@@ -404,8 +405,9 @@ dl { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px 14px; 
 dt { color: var(--ink-3); }
 dd { margin: 0; min-width: 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; overflow-wrap: anywhere; }
 .feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
-.feed li { display: grid; gap: 6px; padding-left: 12px; border-left: 2px solid var(--c, var(--line)); }
-.feed p { font-size: 13px; }
+.feed li { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; padding-left: 12px; border-left: 2px solid var(--c, var(--line)); }
+.feed .row.between { min-width: 0; }
+.feed .row.between .num { flex: none; }
 .feed.compact { gap: 8px; margin-bottom: 14px; }
 .feed.compact li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; border-left-color: var(--line); }
 .runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

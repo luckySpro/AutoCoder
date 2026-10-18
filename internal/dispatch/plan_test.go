@@ -283,3 +283,15 @@ func TestChooseReviewerWaitsForOthers(t *testing.T) {
 		t.Fatal("只有一个能评审的工具时自审", d.ID, ok)
 	}
 }
+
+// 评审把问题写成对象数组时也要能解析（之前会被当成没有结论，反复重评）。
+func TestParseVerdictObjectIssues(t *testing.T) {
+	v, ok := parseVerdict(`{"verdict": "pass", "summary": "可以合并", "issues": [{"severity": "info", "issue": "启动时没有建表"}, "另一条"]}`)
+	if !ok || v.Verdict != "pass" || len(v.Issues) != 2 || v.Issues[0] != "[info] 启动时没有建表" || v.Issues[1] != "另一条" {
+		t.Fatalf("%v %+v", ok, v)
+	}
+	v, ok = parseVerdict(`{"verdict": "changes", "issues": [{"file": "a.rs", "description": "空指针"}]}`)
+	if !ok || v.Issues[0] != "a.rs：空指针" {
+		t.Fatalf("%v %+v", ok, v)
+	}
+}
