@@ -75,7 +75,7 @@ func (e *Engine) Deliver(ctx context.Context, projectID string) (Delivery, error
 			return Delivery{}, fmt.Errorf("%s 与集成分支冲突，需要先处理：%w", base, err)
 		}
 		if p.TestCommand != "" {
-			if ok, out := e.quietShell(ctx, ctl, p.TestCommand); !ok {
+			if ok, out := e.quietTest(ctx, p, ctl); !ok {
 				_ = gitops.ResetHard(ctx, ctl, before)
 				e.Store.Lock()
 				_ = project.Flush(p)
@@ -86,7 +86,7 @@ func (e *Engine) Deliver(ctx context.Context, projectID string) (Delivery, error
 	}
 	// 2. 完整测试
 	if p.TestCommand != "" {
-		if ok, out := e.quietShell(ctx, ctl, p.TestCommand); !ok {
+		if ok, out := e.quietTest(ctx, p, ctl); !ok {
 			return Delivery{}, fmt.Errorf("集成分支测试没有通过：%s", lastLines(out, 20))
 		}
 	}
@@ -164,9 +164,9 @@ func (e *Engine) addReport(p *project.Project, summary, commit string) {
 	_ = project.AppendReport(p, project.Report{TaskID: "delivery", From: "autocoder", At: time.Now(), Status: project.Merged, Summary: summary, Commit: commit})
 }
 
-func (e *Engine) quietShell(ctx context.Context, dir, command string) (bool, string) {
-	r := newRun(Stat{})
-	return e.shellStep(ctx, dir, command, r, nil, 9)
+// quietTest 运行项目测试（依赖没装全时先装上），不推送实时输出。
+func (e *Engine) quietTest(ctx context.Context, p *project.Project, dir string) (bool, string) {
+	return e.runChecked(ctx, p, dir, p.TestCommand, newRun(Stat{}), nil, 9)
 }
 
 // deliveryNote 生成 .autocoder/deliveries/D<n>.md：完成了什么、验证结果、各工具用量。

@@ -306,6 +306,7 @@ func (e *Engine) Schedule(ctx context.Context) {
 				busyTools[tool.ID] = true
 				t.Status = project.Running
 				t.Attempts++
+				t.Tool = tool.ID
 				_ = project.SaveTask(p, t)
 				picks = append(picks, pick{p, t, tool, slot})
 			}
@@ -425,9 +426,24 @@ func chooseTool(t *project.Task, tools []toolscan.Detection, assigns []roles.Ass
 	if lead != "" {
 		order = append(order, lead)
 	}
+	// 已经用完尝试次数的工具排到最后：有别的工具能做就先换人
+	usable := func(id string) bool { d, ok := byID[id]; return ok && d.Schedulable() && !d.Disabled }
+	var fresh, avoided []string
 	for _, id := range order {
-		d, ok := byID[id]
-		if ok && d.Schedulable() && !d.Disabled && !busy[id] && !cooling[id] {
+		if slices.Contains(t.Avoid, id) {
+			avoided = append(avoided, id)
+		} else {
+			fresh = append(fresh, id)
+		}
+	}
+	if slices.ContainsFunc(fresh, usable) {
+		order = fresh // 别的工具只是暂时忙，等它空出来
+	} else {
+		order = avoided
+	}
+	for _, id := range order {
+		d := byID[id]
+		if usable(id) && !busy[id] && !cooling[id] {
 			return d, true
 		}
 	}
@@ -498,13 +514,9 @@ func (e *Engine) attempt(ctx context.Context, p *project.Project, taskID string,
 	}
 	startSHA, _ := gitops.RevParse(ctx, dir, "HEAD")
 
-	// 2. 环境准备（只在新建 worktree 时）。失败不拦住任务：搭骨架的任务里
-	// package.json 等还不存在，npm install 必然失败；交给工具自己装依赖，验证环节会兜底。
-	if fresh && p.SetupCommand != "" {
-		if ok, _ := e.shellStep(ctx, dir, p.SetupCommand, run, logf, run.slot); !ok {
-			say("环境准备命令失败（"+p.SetupCommand+"），继续交给工具处理", "warn")
-		}
-	}
+	// 2. 环境准备：新建 worktree 或依赖清单变了（比如上一轮加了依赖）时安装依赖。
+	// 失败不拦住任务：搭骨架的任务里 package.json 等还不存在；交给工具处理，验证环节会兜底。
+	e.ensureDeps(ctx, p, dir, run, logf, run.slot, false)
 
 	// 3. 运行工具
 	prompt := buildPrompt(p, &t, deps, conflicts)
@@ -1010,7 +1022,7 @@ func (e *Engine) verifyAndIntegrate(ctx context.Context, p *project.Project, tas
 	pass, failed := 0, ""
 	var failOut string
 	for _, c := range cmds {
-		ok, outText := e.shellStep(ctx, dir, c, run, logf, run.slot)
+		ok, outText := e.runChecked(ctx, p, dir, c, run, logf, run.slot)
 		if ok {
 			pass++
 		} else if failed == "" {
@@ -1153,7 +1165,7 @@ func (e *Engine) integrate(ctx context.Context, p *project.Project, t *project.T
 	}
 	run.emit(Event{Type: "act", Kind: "run", Text: "合并到 " + p.IntegrationBranch, Meta: "完成", Tone: "ok"})
 	if p.TestCommand != "" {
-		ok, out := e.shellStep(ctx, ctl, p.TestCommand, run, logf, 9)
+		ok, out := e.runChecked(ctx, p, ctl, p.TestCommand, run, logf, 9)
 		if !ok {
 			// 不稳定测试：重跑一次，结果不一致时不算任务失败
 			ok2, _ := e.shellStep(ctx, ctl, p.TestCommand, run, logf, 9)
@@ -1222,12 +1234,33 @@ func (e *Engine) retryOrBlock(t *project.Task, st settings.Settings, reason stri
 		return
 	}
 	t.LastError = reason
+	// 一个工具用完尝试次数：换另一个工具从头再试（最多换两次），不直接停下等你
+	if t.Attempts >= st.MaxAttempts && t.Tool != "" && !slices.Contains(t.Avoid, t.Tool) && len(t.Avoid) < 2 && e.hasOtherTool(t, st) {
+		t.Avoid = append(t.Avoid, t.Tool)
+		t.Attempts = 0
+		t.Status = project.Ready
+		t.LastError = fmt.Sprintf("%s 尝试 %d 次没有通过，换其他工具接着做。上次的问题：\n%s", t.Tool, st.MaxAttempts, reason)
+		return
+	}
 	if t.Attempts >= st.MaxAttempts {
 		t.Status = project.Blocked
 		t.Waiting = fmt.Sprintf("已尝试 %d 次仍未通过。可以修改任务说明或验收标准后点「重试」，也可以改派给其他工具。", t.Attempts)
 		return
 	}
 	t.Status = project.Ready
+}
+
+// hasOtherTool：除了这次用的和已经试过的，还有别的工具能接这个任务。
+func (e *Engine) hasOtherTool(t *project.Task, st settings.Settings) bool {
+	if e.Tools == nil {
+		return false
+	}
+	tools := e.Tools(context.Background())
+	probe := *t
+	probe.Assignee = ""
+	probe.Avoid = append(append([]string(nil), t.Avoid...), t.Tool)
+	d, ok := chooseTool(&probe, tools, Assignments(st, tools), nil, nil)
+	return ok && !slices.Contains(probe.Avoid, d.ID)
 }
 
 func (e *Engine) finish(p *project.Project, taskID string, run *Run, phase string, f func(*project.Task)) {
@@ -1449,6 +1482,7 @@ func (e *Engine) Retry(projectID, taskID string) error {
 	if t.Status == project.Blocked || t.Status == project.Cancelled || t.Status == project.WaitingUser {
 		t.Attempts = 0
 		t.ConflictFails = 0
+		t.Avoid = nil
 	}
 	if t.Assignee != "" {
 		e.ClearAuth(t.Assignee)
