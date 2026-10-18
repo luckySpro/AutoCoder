@@ -87,7 +87,7 @@ func serve(addr, manifest string, openUI bool) {
 
 	ctx := context.Background()
 	store, loadErrs := project.Open(ctx, home)
-	srv := &server.Server{ManifestPath: manifest, Scanner: toolscan.NewScanner(), Git: gitinfo.New(), Version: version, Desktop: desktop,
+	srv := &server.Server{ManifestPath: manifest, RemoteURL: toolscan.RemoteURL, Scanner: toolscan.NewScanner(), Git: gitinfo.New(), Version: version, Desktop: desktop,
 		Projects: store, Settings: &settings.File{Path: filepath.Join(home, "settings.json")}}
 	for _, e := range loadErrs {
 		log.Printf("加载项目失败：%v", e)
@@ -100,7 +100,31 @@ func serve(addr, manifest string, openUI bool) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// 工具不认识派发参数时，多半是 CLI 升级改了参数：拉一次在线清单再重新检测
+	srv.Engine.OnArgError = func(tool string) {
+		uctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if changed, err := srv.UpdateManifest(uctx, 10*time.Minute); err != nil {
+			log.Printf("%s 参数不兼容，更新在线清单失败：%v", tool, err)
+		} else if changed {
+			log.Printf("%s 参数不兼容，已按在线清单更新参数", tool)
+		} else {
+			_, _, _ = srv.Scan(uctx, true) // 重新检测，界面上标出不认识的参数
+		}
+	}
 	srv.Engine.Start(ctx)
+	go func() { // 启动后每 6 小时检查一次在线清单
+		for {
+			uctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if changed, err := srv.UpdateManifest(uctx, time.Hour); err != nil {
+				log.Printf("检查在线工具清单失败：%v", err)
+			} else if changed {
+				log.Printf("在线工具清单有更新，已重新检测工具")
+			}
+			cancel()
+			time.Sleep(6 * time.Hour)
+		}
+	}()
 	log.Printf("已加载 %d 个项目", len(store.Projects()))
 	n := 0
 	for _, t := range tools {

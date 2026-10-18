@@ -43,9 +43,47 @@ type Server struct {
 	Settings   *settings.File
 	LoadErrors []string // 启动时加载失败的项目
 
+	// RemoteURL 是在线工具清单地址；为空时不联网更新（测试中使用）。
+	RemoteURL string
+
 	mu       sync.Mutex
 	scanned  []toolscan.Detection
 	scanTime time.Time
+
+	remoteMu   sync.Mutex
+	remoteAt   time.Time // 上次检查在线清单的时间
+	remoteErr  string
+	remoteDiff bool
+}
+
+// UpdateManifest 拉取在线工具清单（CLI 参数随版本变化时不用等新版本发布）。
+// minGap 内检查过就跳过；清单有变化时重新检测工具。
+func (s *Server) UpdateManifest(ctx context.Context, minGap time.Duration) (changed bool, err error) {
+	if s.RemoteURL == "" {
+		return false, nil
+	}
+	s.remoteMu.Lock()
+	if !s.remoteAt.IsZero() && time.Since(s.remoteAt) < minGap {
+		s.remoteMu.Unlock()
+		return false, nil
+	}
+	s.remoteAt = time.Now()
+	s.remoteMu.Unlock()
+	// 联网时不持锁，免得界面读工具列表时卡住
+	changed, err = toolscan.FetchRemote(ctx, s.RemoteURL, toolscan.RemotePath(s.ManifestPath))
+	s.remoteMu.Lock()
+	s.remoteAt, s.remoteDiff, s.remoteErr = time.Now(), changed, ""
+	if err != nil {
+		s.remoteErr = err.Error()
+	}
+	s.remoteMu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		_, _, err = s.Scan(ctx, true)
+	}
+	return changed, err
 }
 
 // Scan 返回检测结果；refresh 为 true 或尚未检测时重新扫描。
@@ -77,6 +115,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tools/{id}", s.deleteTool)
 	mux.HandleFunc("GET /api/tools/export", s.exportTools)
 	mux.HandleFunc("POST /api/tools/import", s.importTools)
+	mux.HandleFunc("POST /api/tools/update-manifest", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		_, _ = s.UpdateManifest(ctx, 0)
+		r.URL.RawQuery = "refresh=1"
+		s.listTools(w, r)
+	})
 
 	mux.HandleFunc("GET /api/roles", func(w http.ResponseWriter, r *http.Request) {
 		tools, _, err := s.Scan(r.Context(), false)
@@ -139,7 +184,18 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 		"scannedAt":    at,
 		"strengths":    toolscan.Strengths,
 		"tools":        tools,
+		"remote":       s.remoteState(),
 	})
+}
+
+func (s *Server) remoteState() map[string]any {
+	s.remoteMu.Lock()
+	defer s.remoteMu.Unlock()
+	st := map[string]any{"enabled": s.RemoteURL != "", "changed": s.remoteDiff, "error": s.remoteErr}
+	if !s.remoteAt.IsZero() {
+		st["checkedAt"] = s.remoteAt
+	}
+	return st
 }
 
 // saveTool 新增或修改一个工具，写入用户清单后立即重新检测。
@@ -154,6 +210,7 @@ func (s *Server) saveTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
+	t = toolscan.ForSave(t, s.ManifestPath)
 	s.updateUser(w, r, func(m toolscan.Manifest) toolscan.Manifest { return toolscan.Upsert(m, t) })
 }
 

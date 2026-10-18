@@ -27,7 +27,10 @@ case "$FAKE_MODE" in
   noop)  echo '{"type":"result","result":"我需要更多信息，要用哪个数据库？","usage":{"input_tokens":10,"output_tokens":5}}'; exit 0;;
   crash) echo "boom" >&2; exit 3;;
   auth)  echo "Error: not logged in" >&2; exit 1;;
+  badarg) echo "error: unexpected argument '--full-auto' found" >&2; exit 2;;
   scope) echo "x" > outside.txt;;
+  twice) if [ ! -f "$FAKE_MARK" ]; then touch "$FAKE_MARK"; mkdir -p src && echo done > src/hello.txt; echo "崩了" >&2; exit 3; fi
+         echo '{"type":"result","result":"之前已经写好，检查通过，不需要改动。","usage":{"input_tokens":10,"output_tokens":5}}'; exit 0;;
   slow)  echo "{\"type\":\"system\",\"subtype\":\"init\"}"; sleep 30;;
 esac
 echo '{"type":"system","subtype":"init","model":"fake-1"}'
@@ -326,4 +329,44 @@ func TestRetryBlocked(t *testing.T) {
 		t.Fatalf("ids=%v err=%v", ids, err)
 	}
 	e.waitStatus(t, id, project.Merged)
+}
+
+// 前一次尝试已把活干完（作为 WIP 提交），这次没有新改动：直接验证合并，不算失败。
+func TestNoNewChangeAfterWIPMerges(t *testing.T) {
+	t.Setenv("FAKE_MODE", "twice")
+	t.Setenv("FAKE_MARK", filepath.Join(t.TempDir(), "mark"))
+	e := setup(t, "")
+	id := e.addTask(t, project.Task{Title: "第二次只确认"})
+	task := e.waitStatus(t, id, project.Merged)
+	if task.Attempts != 2 {
+		t.Fatalf("attempts=%d", task.Attempts)
+	}
+}
+
+// 工具不认识参数：不算尝试，暂停这个工具，也不把任务判成受阻。
+func TestArgErrorDoesNotCountAttempt(t *testing.T) {
+	t.Setenv("FAKE_MODE", "badarg")
+	e := setup(t, "")
+	called := make(chan string, 4)
+	e.eng.OnArgError = func(tool string) { called <- tool }
+	id := e.addTask(t, project.Task{Title: "参数不兼容"})
+	deadline := time.Now().Add(15 * time.Second)
+	got := ""
+	for got == "" && time.Now().Before(deadline) {
+		e.eng.Schedule(e.ctx)
+		select {
+		case got = <-called:
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	if got != "fake" {
+		t.Fatalf("应该通知参数错误：%q", got)
+	}
+	task := e.waitStatus(t, id, project.Ready)
+	if task.Attempts != 0 || !strings.Contains(task.LastError, "不认识派发参数") {
+		t.Fatalf("%+v", task)
+	}
+	if st := e.eng.ToolState()["fake"]; st == "" {
+		t.Fatal("工具应暂停")
+	}
 }

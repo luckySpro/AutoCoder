@@ -33,6 +33,8 @@ type Engine struct {
 	// Tools 返回当前检测结果（由服务缓存）。
 	Tools  func(ctx context.Context) []toolscan.Detection
 	LogDir string // ~/.autocoder/logs
+	// OnArgError 在工具报"不认识的参数"时调用（例如去检查在线参数清单）；可为空。
+	OnArgError func(tool string)
 	// VerifyTimeout 是每条验证命令的超时。
 	VerifyTimeout time.Duration
 	// Tick 是调度与观察的间隔（测试中调小）。
@@ -378,6 +380,9 @@ func (e *Engine) authorOf(projectID string, t *project.Task) string {
 	return t.Assignee
 }
 
+// argErrorKeys 是各 CLI 报"不认识的参数"时的常见说法（clap、commander、yargs、argparse、cobra）。
+var argErrorKeys = []string{"unexpected argument", "unknown option", "unrecognized option", "unknown argument", "unknown arguments", "unrecognized arguments", "unknown flag", "unknown shorthand flag"}
+
 // OverBudget 表示项目的 token 已用完预算（调用方持有锁）。
 func OverBudget(p *project.Project) bool {
 	return p.TokenBudget > 0 && p.Spent >= p.TokenBudget
@@ -440,6 +445,7 @@ type outcome struct {
 	stopBy    string
 	authErr   bool
 	limitErr  bool
+	argErr    string // 工具不认识某个参数时的原话
 	duration  time.Duration
 	startErr  error
 	conflicts []string
@@ -601,6 +607,8 @@ func (e *Engine) exec(ctx context.Context, dir string, tool toolscan.Detection, 
 	var pmu sync.Mutex
 	var tail []string
 	var authErr, limitErr bool
+	var argErr string
+	lines := 0 // 参数错误只会出现在开头几行
 	authKeys := lower(tool.AuthErrors)
 	limitKeys := lower(tool.LimitErrors)
 	consume := func(r io.Reader, isErr bool, wg *sync.WaitGroup) {
@@ -616,6 +624,10 @@ func (e *Engine) exec(ctx context.Context, dir string, tool toolscan.Detection, 
 			}
 			if containsAny(lw, limitKeys) {
 				limitErr = true
+			}
+			lines++
+			if argErr == "" && lines <= 20 && containsAny(lw, argErrorKeys) {
+				argErr = strings.TrimSpace(ansiRe.ReplaceAllString(raw, ""))
 			}
 			var ls []line
 			var as []act
@@ -713,8 +725,12 @@ loop:
 	if final == "" {
 		final = ps.lastAgent
 	}
-	return outcome{exit: code, final: final, tail: tail, usage: ps.usage, exact: ps.exact, stopBy: run.stoppedBy(),
+	o := outcome{exit: code, final: final, tail: tail, usage: ps.usage, exact: ps.exact, stopBy: run.stoppedBy(),
 		authErr: authErr && code != 0, limitErr: limitErr && code != 0, duration: time.Since(start)}
+	if code != 0 && o.duration < 30*time.Second { // 参数错误会立刻退出
+		o.argErr = argErr
+	}
+	return o
 }
 
 func summarize(ch []gitops.Change) ([]string, int, int) {
@@ -806,6 +822,19 @@ func (e *Engine) afterExit(ctx context.Context, p *project.Project, taskID strin
 			t.LastError = tool.Name + " 无法启动：" + out.startErr.Error()
 		})
 		return
+	case out.argErr != "":
+		// 参数与当前安装的版本不兼容：不是任务的问题，不算尝试，换工具接着做
+		until := e.cool(tool.ID, true)
+		if e.OnArgError != nil {
+			go e.OnArgError(tool.ID)
+		}
+		msg := fmt.Sprintf("%s 不认识派发参数（%s），已暂停到 %s 并改派；可在工具清单点「检查参数更新」或修改参数", tool.Name, clip(out.argErr, 200), until.Format("15:04"))
+		e.finishReport(p, t.ID, run, "failed", report, msg, func(t *project.Task) {
+			t.Attempts--
+			t.Status = project.Ready
+			t.LastError = msg
+		})
+		return
 	case out.authErr:
 		e.mu.Lock()
 		e.authWait[tool.ID] = true
@@ -890,6 +919,11 @@ func (e *Engine) afterExit(ctx context.Context, p *project.Project, taskID strin
 		failReason = out.stopBy
 	case out.exit != 0:
 		failReason = fmt.Sprintf("%s 非零退出（退出码 %d）：%s", tool.Name, out.exit, strings.Join(out.tail[max(0, len(out.tail)-8):], "\n"))
+	case len(own) == 0 && !gitops.Merging(ctx, dir) && len(gitops.ChangedFiles(ctx, dir, p.IntegrationBranch, "HEAD")) > 0:
+		// 之前的尝试已经把活干完并提交了，这次只是确认：直接去验证，不算失败
+		msg := "这次没有新改动，分支上已有之前尝试的提交，直接验证"
+		run.emit(Event{Type: "act", Kind: "say", Text: msg})
+		writeLog(logf, msg, false)
 	case len(own) == 0 && !gitops.Merging(ctx, dir):
 		failReason = "没有任何改动"
 		if q := strings.TrimSpace(out.final); strings.HasSuffix(q, "?") || strings.HasSuffix(q, "？") {

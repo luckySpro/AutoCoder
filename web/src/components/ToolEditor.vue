@@ -19,6 +19,7 @@ const f = reactive({
   vendor: props.tool?.vendor ?? '',
   commands: (props.tool?.commands ?? []).join(' '),
   versionArgs: join(props.tool?.versionArgs ?? ['--version']),
+  helpArgs: join(props.tool?.helpArgs ?? ['--help']),
   headless: join(props.tool?.headless ?? ['-p', '{prompt}']),
   usageArgs: join(props.tool?.usageArgs),
   autoArgs: join(props.tool?.autoArgs),
@@ -70,7 +71,7 @@ function toSpec(): ToolSpec {
   const paths = ps.length ? { darwin: ps, linux: ps, windows: ps } : undefined
   return {
     id: f.id, name: f.name.trim(), vendor: f.vendor.trim(), commands: split(f.commands), paths,
-    versionArgs: split(f.versionArgs), headless: split(f.headless), usageArgs: opt(split(f.usageArgs)),
+    versionArgs: split(f.versionArgs), helpArgs: opt(split(f.helpArgs)), headless: split(f.headless), usageArgs: opt(split(f.usageArgs)),
     autoArgs: opt(split(f.autoArgs)), fullArgs: opt(split(f.fullArgs)), access: f.access === 'standard' ? 'standard' : undefined, streamArgs: opt(split(f.streamArgs)), readonlyArgs: opt(split(f.readonlyArgs)),
     authErrors: opt(lines(f.authErrors)), limitErrors: opt(lines(f.limitErrors)),
     capability: Number(f.capability), strengths: f.strengths, disabled: f.disabled,
@@ -192,6 +193,9 @@ const err = (k: string) => (touched.value ? errors.value[k] : '')
           <summary>高级</summary>
           <label class="field">版本参数
             <input id="ed-ver" v-model="f.versionArgs" class="mono" placeholder="--version" />
+          </label>
+          <label class="field">帮助参数 <span class="help">检测时读它的帮助，核对上面的参数当前版本还认不认识；留空不核对</span>
+            <input id="ed-help" v-model="f.helpArgs" class="mono" placeholder="--help" />
           </label>
           <label class="field">额外安装路径 <span class="help">不在 PATH 中时填写，每行一个</span>
             <textarea id="ed-paths" v-model="f.paths" class="mono" rows="3" placeholder="~/.local/bin/my-agent"></textarea>

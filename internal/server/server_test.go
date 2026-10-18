@@ -145,3 +145,39 @@ func TestLocalOnlyGuard(t *testing.T) {
 		t.Errorf("非回环 Host 应被拒绝，实际 %d", rec.Code)
 	}
 }
+
+// 在线清单更新了 codex 的参数：点「检查参数更新」后派发参数立即换成新的。
+func TestUpdateManifest(t *testing.T) {
+	remote := `tools:
+  - id: codex
+    headless: ["exec", "{prompt}"]
+    full_args: ["--new-yolo"]
+`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(remote)) }))
+	defer ts.Close()
+	s, h := newTestServer(t)
+	s.RemoteURL = ts.URL
+	rec := do(h, "POST", "/api/tools/update-manifest", "", local)
+	var body struct {
+		Tools  []toolscan.Detection `json:"tools"`
+		Remote struct {
+			Changed bool   `json:"changed"`
+			Error   string `json:"error"`
+		} `json:"remote"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != 200 || !body.Remote.Changed || body.Remote.Error != "" {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	for _, d := range body.Tools {
+		if d.ID == "codex" && (len(d.FullArgs) != 1 || d.FullArgs[0] != "--new-yolo") {
+			t.Fatalf("参数没更新：%v", d.FullArgs)
+		}
+	}
+	// 再点一次：内容没变
+	rec = do(h, "POST", "/api/tools/update-manifest", "", local)
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Remote.Changed {
+		t.Fatal("内容没变不应标记更新")
+	}
+}

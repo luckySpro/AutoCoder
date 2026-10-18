@@ -2,7 +2,7 @@ import { reactive } from 'vue'
 import { mockAssignments, mockIdentity, mockLocal, mockProjects, mockRepos, mockRoles, mockRunning, mockTools, mockUsage } from './mock'
 import type {
   Assignment, CreateProjectRequest, GitIdentity, GitRepo, LocalRepo, Plan, Project, Report, RoleId, RoleInfo, RunningTask, RunStat, Settings,
-  Task, TaskInput, ToolDetection, ToolSpec, UsageRecord,
+  RemoteManifest, Task, TaskInput, ToolDetection, ToolSpec, UsageRecord,
 } from './types'
 
 const ASSIGN_KEY = 'autocoder.assignments'
@@ -53,6 +53,7 @@ export const store = reactive({
   loading: false,
   demo: false,
   scannedAt: '',
+  remote: null as RemoteManifest | null, // 在线工具清单检查结果
   manifestPath: '',
   searchPath: [] as string[], // 检测时查找命令的目录
   tools: [] as ToolDetection[],
@@ -68,13 +69,14 @@ export const store = reactive({
   settings: loadJSON<Settings>(SETTINGS_KEY) ?? { ...DEFAULT_SETTINGS },
 })
 
-type ToolsResp = { tools: ToolDetection[]; scannedAt: string; manifestPath: string; searchPath?: string[] }
+type ToolsResp = { tools: ToolDetection[]; scannedAt: string; manifestPath: string; searchPath?: string[]; remote?: RemoteManifest }
 
 function applyTools(t: ToolsResp) {
   store.tools = t.tools
   store.scannedAt = t.scannedAt
   store.manifestPath = t.manifestPath
   store.searchPath = t.searchPath ?? []
+  store.remote = t.remote ?? null
 }
 
 export async function scanTools(rescan = false) {
@@ -110,8 +112,8 @@ export async function scanTools(rescan = false) {
 // ---------- 工具清单管理 ----------
 
 export function specOf(t: ToolDetection): ToolSpec {
-  const { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, autoArgs, fullArgs, access, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled } = t
-  return { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, autoArgs, fullArgs, access, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled }
+  const { id, name, vendor, commands, paths, versionArgs, helpArgs, headless, usageArgs, autoArgs, fullArgs, access, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled } = t
+  return { id, name, vendor, commands, paths, versionArgs, helpArgs, headless, usageArgs, autoArgs, fullArgs, access, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled }
 }
 
 export async function saveTool(spec: ToolSpec) {
@@ -138,6 +140,13 @@ export async function removeTool(id: string) {
     return
   }
   applyTools(await call<ToolsResp>('DELETE', `/api/tools/${encodeURIComponent(id)}`))
+}
+
+// 拉取在线工具清单（各 CLI 最新的派发参数），并重新检测
+export async function updateManifest() {
+  if (store.demo) throw new ApiError('预览模式不能联网更新，请在本机运行 AutoCoder', 0)
+  applyTools(await call<ToolsResp>('POST', '/api/tools/update-manifest'))
+  return store.remote
 }
 
 export async function importTools(yaml: string) {
