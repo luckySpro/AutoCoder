@@ -32,7 +32,10 @@ type Tool struct {
 	Headless    []string            `yaml:"headless" json:"headless,omitempty"`
 	UsageArgs   []string            `yaml:"usage_args" json:"usageArgs,omitempty"`
 	// 无人值守派发用的参数（见 DESIGN §6.3），都可以在界面上编辑。
-	AutoArgs     []string `yaml:"auto_args,omitempty" json:"autoArgs,omitempty"`         // 免确认、限定在工作目录内修改
+	AutoArgs []string `yaml:"auto_args,omitempty" json:"autoArgs,omitempty"` // 免确认、限定在工作目录内修改
+	FullArgs []string `yaml:"full_args,omitempty" json:"fullArgs,omitempty"` // 最高权限：直接执行命令、联网，不再询问
+	// Access 选择派发时用哪组参数："full"（默认，最高权限，用 full_args）或 "standard"（只改文件，用 auto_args）。
+	Access       string   `yaml:"access,omitempty" json:"access,omitempty"`
 	StreamArgs   []string `yaml:"stream_args,omitempty" json:"streamArgs,omitempty"`     // 输出可解析的事件流；设置后代替 usage_args
 	ReadonlyArgs []string `yaml:"readonly_args,omitempty" json:"readonlyArgs,omitempty"` // 只读模式，用于规划与评审
 	AuthErrors   []string `yaml:"auth_errors,omitempty" json:"authErrors,omitempty"`     // 输出中表示"未登录"的关键字
@@ -72,6 +75,9 @@ func (d Detection) ExactUsage() bool {
 // 无人值守（或只读）参数与事件流/用量参数插在提示词之前（提示词前面紧挨的选项如 -p 一起后移）。
 func (t Tool) Args(prompt string, readonly bool) []string {
 	extra := append([]string(nil), t.AutoArgs...)
+	if t.FullAccess() {
+		extra = append([]string(nil), t.FullArgs...)
+	}
 	if readonly {
 		extra = append([]string(nil), t.ReadonlyArgs...)
 	}
@@ -100,6 +106,11 @@ func (t Tool) Args(prompt string, readonly bool) []string {
 		out = append(out, a)
 	}
 	return out
+}
+
+// FullAccess 表示派发时用最高权限参数：没有改成 standard 且配了 full_args。
+func (t Tool) FullAccess() bool {
+	return t.Access != "standard" && len(t.FullArgs) > 0
 }
 
 // Builtin 返回内置清单。
@@ -132,6 +143,10 @@ func Merge(base, override Manifest) Manifest {
 	}
 	for _, t := range override.Tools {
 		if i, ok := idx[t.ID]; ok {
+			// 旧版本保存的条目没有最高权限参数，沿用内置的，否则默认的最高权限不生效
+			if len(t.FullArgs) == 0 {
+				t.FullArgs = out.Tools[i].FullArgs
+			}
 			t.Source = SourceModified
 			out.Tools[i] = t
 		} else {

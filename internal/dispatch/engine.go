@@ -1432,6 +1432,31 @@ func (e *Engine) Retry(projectID, taskID string) error {
 	return err
 }
 
+// RetryBlocked 把项目里所有受阻、等你处理的任务一次放回派发队列（尝试次数清零）。
+// 等你确认改动的任务需要人看过再合并，不在其中。返回重试了的任务编号。
+func (e *Engine) RetryBlocked(projectID string) ([]string, error) {
+	e.Store.Lock()
+	p := e.Store.Get(projectID)
+	if p == nil {
+		e.Store.Unlock()
+		return nil, errors.New("项目不存在")
+	}
+	var ids []string
+	for _, t := range p.Tasks {
+		if (t.Status == project.Blocked || t.Status == project.WaitingUser) && !strings.Contains(t.Waiting, "确认改动") {
+			ids = append(ids, t.ID)
+		}
+	}
+	e.Store.Unlock()
+	done := []string{}
+	for _, id := range ids {
+		if err := e.Retry(projectID, id); err == nil {
+			done = append(done, id)
+		}
+	}
+	return done, nil
+}
+
 // Cancel 取消任务；运行中的先停止。
 func (e *Engine) Cancel(projectID, taskID string) error {
 	if e.Stop(projectID + "/" + taskID) {

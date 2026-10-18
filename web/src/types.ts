@@ -19,7 +19,9 @@ export interface ToolSpec {
   versionArgs?: string[]
   headless?: string[]
   usageArgs?: string[] // 有值表示能输出精确的 token 用量
-  autoArgs?: string[] // 无人值守：免确认、限定在工作目录内修改
+  autoArgs?: string[] // 无人值守：免确认、限定在工作目录内修改（权限选「只改文件」时使用）
+  fullArgs?: string[] // 最高权限：直接执行命令、联网、不再询问（默认使用）
+  access?: 'full' | 'standard' // 派发权限，留空等于 full
   streamArgs?: string[] // 输出事件流（实时查看过程），设置后代替 usageArgs
   readonlyArgs?: string[] // 只读模式，用于规划与评审
   authErrors?: string[] // 输出中表示"未登录"的关键字

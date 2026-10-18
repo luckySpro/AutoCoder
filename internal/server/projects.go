@@ -31,6 +31,7 @@ func (s *Server) projectRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{id}/tasks", s.createTask)
 	mux.HandleFunc("PATCH /api/projects/{id}/tasks/{task}", s.patchTask)
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/{action}", s.taskAction)
+	mux.HandleFunc("POST /api/projects/{id}/retry-blocked", s.retryBlocked)
 	mux.HandleFunc("POST /api/projects/{id}/deliver", s.deliver)
 	mux.HandleFunc("POST /api/projects/{id}/requests", s.createRequest)
 	mux.HandleFunc("PUT /api/projects/{id}/requests/{req}/plan", s.putPlan)
@@ -342,6 +343,15 @@ func (s *Server) taskAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) retryBlocked(w http.ResponseWriter, r *http.Request) {
+	ids, err := s.Engine.RetryBlocked(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"retried": ids})
 }
 
 // ---------- 需求与计划 ----------
