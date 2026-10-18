@@ -31,6 +31,15 @@ const done = (p: Project) => p.tasks.filter((t) => t.status === 'merged').length
 const crew = (p: Project) => [...new Set(p.tasks.map((t) => t.assignee).filter(Boolean))]
 const tokens = (p: Project) => store.usage.filter((u) => u.projectId === p.id).reduce((n, u) => n + totalTokens(u.usage), 0)
 const blocked = (p: Project) => p.tasks.filter((t) => t.status === 'blocked' || t.status === 'waiting-user')
+// 卡片右下角「等你处理」：受阻任务、等你回答或确认的需求、预算用完
+const reqText: Record<string, string> = { questions: '有问题要你回答', proposed: '计划等你确认', failed: '规划没有完成' }
+function pending(p: Project) {
+  const items = blocked(p).map((t) => ({ id: t.id, text: t.status === 'blocked' ? '受阻' : t.waiting?.includes('确认改动') ? '等你确认改动' : '等你处理', task: true }))
+  for (const r of p.requests ?? []) if (reqText[r.status]) items.push({ id: r.id, text: reqText[r.status], task: false })
+  if ((p.tokenBudget ?? 0) > 0 && (p.spent ?? 0) >= (p.tokenBudget ?? 0)) items.push({ id: '', text: 'Token 预算已用完', task: false })
+  return items
+}
+const open = (p: Project, it: { id: string; task: boolean }) => router.push(it.task ? `/projects/${p.id}?task=${it.id}` : `/projects/${p.id}`)
 
 function added(id: string) {
   adding.value = false
@@ -75,7 +84,6 @@ function added(id: string) {
         <div class="progress">
           <div class="row between small">
             <span><b class="num">{{ done(p) }}</b><span class="faint"> / {{ p.tasks.length }} 已合并</span></span>
-            <span v-if="blocked(p).length" class="pill bad">{{ blocked(p).map((t) => t.id).join('、') }} 受阻</span>
           </div>
           <div class="strip" :aria-label="stripLabel(p)">
             <span v-for="t in strip(p)" :key="t.id" :class="['seg', t.status]" :title="`${t.id} ${t.title} · ${sm(t.status).label}`"></span>
@@ -87,6 +95,13 @@ function added(id: string) {
             <AgentMark v-for="id in crew(p)" :key="id" :id="id" :size="26" />
           </div>
           <div class="small faint num">{{ fmtTokens(tokens(p)) }} token · {{ p.updatedAt }}</div>
+          <div v-if="pending(p).length" class="todo" :aria-label="`${p.name} 等你处理 ${pending(p).length} 件`">
+            <span class="todo-head">等你处理 <b class="num">{{ pending(p).length }}</b></span>
+            <button v-for="it in pending(p).slice(0, 3)" :key="it.id + it.text" type="button" class="todo-item" @click.prevent.stop="open(p, it)">
+              <b v-if="it.id" class="mono">{{ it.id }}</b> {{ it.text }}
+            </button>
+            <span v-if="pending(p).length > 3" class="small faint">还有 {{ pending(p).length - 3 }} 件</span>
+          </div>
         </div>
       </RouterLink>
 
@@ -136,6 +151,11 @@ function added(id: string) {
 .empty-list { padding: 28px; display: grid; gap: 10px; justify-items: start; }
 .side { display: grid; gap: 8px; justify-items: end; }
 .crew { display: flex; gap: 4px; }
+.todo { display: grid; gap: 2px; justify-items: end; padding: 6px 10px; border: 1px solid var(--bad); border-radius: var(--r); background: color-mix(in srgb, var(--bad) 8%, var(--surface)); max-width: 260px; }
+.todo-head { font-size: 11px; letter-spacing: 0.04em; color: var(--bad); }
+.todo-item { all: unset; cursor: pointer; font-size: 12px; color: var(--ink); text-align: right; overflow-wrap: anywhere; }
+.todo-item:hover { color: var(--bad); text-decoration: underline; }
+.todo-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 .add {
   grid-template-columns: auto 1fr; gap: 14px; border-style: dashed; background: transparent; cursor: pointer;
   font: inherit; text-align: left; color: var(--ink-2);
@@ -145,7 +165,7 @@ function added(id: string) {
 .add:hover { background: var(--surface); }
 @media (max-width: 960px) {
   .proj { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-  .side { justify-items: start; grid-auto-flow: column; align-items: center; justify-content: space-between; }
+  .side { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat:nth-child(3) { border-left: 0; }
   .stat:nth-child(n+3) { border-top: 1px solid var(--line); }
