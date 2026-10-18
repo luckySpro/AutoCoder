@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { agent } from '../agents'
-import { deliverProject, fmtTokens, logURL, roleName, store, taskAction, toolName, totalTokens, updateProject, updateTask } from '../api'
+import { deliverProject, fmtTokens, logURL, roleName, store, taskAction, toolName, totalTokens, retryBlocked, updateProject, updateTask } from '../api'
 import AgentMark from '../components/AgentMark.vue'
 import BranchLanes from '../components/BranchLanes.vue'
 import Icon from '../components/Icon.vue'
@@ -87,6 +87,15 @@ async function retryWith(t: Task, tool: string) {
     if (tool !== t.assignee) await updateTask(id, t.id, { assignee: tool })
     await taskAction(id, t.id, 'retry')
   }, `${t.id} 已交给 ${toolName(tool)} 重新开始`)
+}
+const retryable = computed(() => waiting.value.filter(canRetry))
+async function retryAll() {
+  if (!project.value) return
+  const id = project.value.id
+  await act('retry-all', async () => {
+    const r = await retryBlocked(id)
+    notice.value = { text: r.retried.length ? `已把 ${r.retried.join('、')} 放回派发队列` : '没有可以重试的任务' }
+  })
 }
 const attempts = (t: Task) => Array.from({ length: t.attempts ?? 0 }, (_, i) => i + 1)
 function saved(id: string) {
@@ -177,7 +186,13 @@ const repoSlug = computed(() => project.value?.remote?.replace(/^.*github\.com[:
     </div>
 
     <div v-if="waiting.length || overBudget" class="panel waiting">
-      <div class="panel-head"><h2>等你处理</h2><span class="hint num">{{ waiting.length + (overBudget ? 1 : 0) }}</span></div>
+      <div class="panel-head">
+        <h2>等你处理</h2>
+        <span class="row head-ops">
+          <button v-if="retryable.length > 1" class="btn sm primary" :disabled="!!busy" @click="retryAll"><Icon name="play" />全部重试 {{ retryable.length }}</button>
+          <span class="hint num">{{ waiting.length + (overBudget ? 1 : 0) }}</span>
+        </span>
+      </div>
       <ul>
         <li v-if="overBudget">
           <button class="linkish" @click="openSettings">Token 预算已用完</button>
@@ -414,6 +429,7 @@ dd { margin: 0; min-width: 0; display: flex; gap: 8px; align-items: center; flex
 .waiting { border-color: var(--bad); }
 .waiting ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .waiting li { display: grid; gap: 4px; font-size: 13px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.waiting .head-ops { gap: 10px; align-items: center; }
 .waiting li:last-child { border-bottom: 0; padding-bottom: 0; }
 .waiting .msg { white-space: pre-line; overflow-wrap: anywhere; max-height: 6.5em; overflow: auto; }
 .waiting .quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }

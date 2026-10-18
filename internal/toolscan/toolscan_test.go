@@ -109,6 +109,10 @@ func TestArgs(t *testing.T) {
 		{Tool{Headless: []string{"exec", "{prompt}"}, AutoArgs: []string{"--sandbox", "workspace-write"}, UsageArgs: []string{"--json"}}, false, "exec --sandbox workspace-write --json 做事"},
 		{Tool{Headless: []string{"exec", "{prompt}"}, AutoArgs: []string{"--sandbox", "workspace-write"}, ReadonlyArgs: []string{"--sandbox", "read-only"}}, true, "exec --sandbox read-only 做事"},
 		{Tool{Headless: []string{"--message", "{prompt}", "--yes-always"}}, false, "--message 做事 --yes-always"},
+		// 默认最高权限；改成 standard 用回无人值守参数；只读仍用只读参数
+		{Tool{Headless: []string{"exec", "{prompt}"}, AutoArgs: []string{"--sandbox", "workspace-write"}, FullArgs: []string{"--dangerously-bypass-approvals-and-sandbox"}}, false, "exec --dangerously-bypass-approvals-and-sandbox 做事"},
+		{Tool{Headless: []string{"exec", "{prompt}"}, AutoArgs: []string{"--sandbox", "workspace-write"}, FullArgs: []string{"--dangerously-bypass-approvals-and-sandbox"}, Access: "standard"}, false, "exec --sandbox workspace-write 做事"},
+		{Tool{Headless: []string{"exec", "{prompt}"}, FullArgs: []string{"--dangerously-bypass-approvals-and-sandbox"}, ReadonlyArgs: []string{"--sandbox", "read-only"}}, true, "exec --sandbox read-only 做事"},
 	}
 	for _, c := range cases {
 		if got := strings.Join(c.tool.Args("做事", c.readonly), " "); got != c.want {

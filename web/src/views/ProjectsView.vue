@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { fmtTokens, store, todayKey, totalTokens } from '../api'
+import { fmtTokens, retryBlocked, store, todayKey, totalTokens } from '../api'
 import AddProjectDialog from '../components/AddProjectDialog.vue'
 import AgentMark from '../components/AgentMark.vue'
 import Icon from '../components/Icon.vue'
@@ -39,6 +39,22 @@ function pending(p: Project) {
   if ((p.tokenBudget ?? 0) > 0 && (p.spent ?? 0) >= (p.tokenBudget ?? 0)) items.push({ id: '', text: 'Token 预算已用完', task: false })
   return items
 }
+// 卡片上一键把受阻的任务全部重试
+const retrying = ref('')
+const note = ref('')
+async function retryAll(p: Project) {
+  retrying.value = p.id
+  try {
+    const r = await retryBlocked(p.id)
+    note.value = r.retried.length ? `${p.name}：已把 ${r.retried.join('、')} 放回派发队列` : `${p.name}：没有可以重试的任务`
+  } catch (e) {
+    note.value = (e as Error).message
+  } finally {
+    retrying.value = ''
+    setTimeout(() => (note.value = ''), 4000)
+  }
+}
+const canRetryAll = (p: Project) => blocked(p).some((t) => !t.waiting?.includes('确认改动'))
 const open = (p: Project, it: { id: string; task: boolean }) => router.push(it.task ? `/projects/${p.id}?task=${it.id}` : `/projects/${p.id}`)
 
 function added(id: string) {
@@ -65,6 +81,7 @@ function added(id: string) {
       </div>
     </div>
 
+    <p v-if="note" class="note small" role="status">{{ note }}</p>
     <div class="list">
       <div v-if="!store.projects.length" class="panel empty-list">
         <h2>还没有项目</h2>
@@ -101,6 +118,7 @@ function added(id: string) {
               <b v-if="it.id" class="mono">{{ it.id }}</b> {{ it.text }}
             </button>
             <span v-if="pending(p).length > 3" class="small faint">还有 {{ pending(p).length - 3 }} 件</span>
+            <button v-if="canRetryAll(p)" type="button" class="btn sm primary todo-retry" :disabled="retrying === p.id" @click.prevent.stop="retryAll(p)"><Icon name="play" :size="13" />{{ retrying === p.id ? '重试中…' : '全部重试' }}</button>
           </div>
         </div>
       </RouterLink>
@@ -152,6 +170,8 @@ function added(id: string) {
 .side { display: grid; gap: 8px; justify-items: end; }
 .crew { display: flex; gap: 4px; }
 .todo { display: grid; gap: 2px; justify-items: end; padding: 6px 10px; border: 1px solid var(--bad); border-radius: var(--r); background: color-mix(in srgb, var(--bad) 8%, var(--surface)); max-width: 260px; }
+.todo-retry { margin-top: 4px; }
+.note { margin: 0 0 8px; padding: 8px 12px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
 .todo-head { font-size: 11px; letter-spacing: 0.04em; color: var(--bad); }
 .todo-item { all: unset; cursor: pointer; font-size: 12px; color: var(--ink); text-align: right; overflow-wrap: anywhere; }
 .todo-item:hover { color: var(--bad); text-decoration: underline; }

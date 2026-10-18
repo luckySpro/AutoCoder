@@ -110,8 +110,8 @@ export async function scanTools(rescan = false) {
 // ---------- 工具清单管理 ----------
 
 export function specOf(t: ToolDetection): ToolSpec {
-  const { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, autoArgs, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled } = t
-  return { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, autoArgs, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled }
+  const { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, autoArgs, fullArgs, access, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled } = t
+  return { id, name, vendor, commands, paths, versionArgs, headless, usageArgs, autoArgs, fullArgs, access, streamArgs, readonlyArgs, authErrors, limitErrors, capability, strengths, disabled }
 }
 
 export async function saveTool(spec: ToolSpec) {
@@ -296,6 +296,12 @@ export async function updateTask(projectId: string, taskId: string, input: Parti
     return
   }
   return mutate<Task>('PATCH', `/api/projects/${pid(projectId)}/tasks/${pid(taskId)}`, input)
+}
+
+// 把项目里所有受阻、等你处理的任务一次放回派发队列（等你确认改动的除外）
+export async function retryBlocked(projectId: string): Promise<{ retried: string[] }> {
+  if (store.demo) throw new ApiError('预览模式不能派发任务，请在本机运行 AutoCoder', 0)
+  return mutate('POST', `/api/projects/${pid(projectId)}/retry-blocked`)
 }
 
 export async function taskAction(projectId: string, taskId: string, action: 'retry' | 'cancel' | 'approve') {

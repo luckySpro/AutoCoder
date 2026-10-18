@@ -12,6 +12,8 @@
 #   usage_args  追加到 headless 后、让工具输出含 token 用量的结构化结果的参数；为空时按字符数估算
 #   auto_args   无人值守参数：免确认、限定在工作目录内修改
 #   stream_args 输出事件流的参数（用于实时查看过程）；设置后代替 usage_args
+#   full_args   最高权限参数：直接执行命令、联网、不再询问；默认使用，
+#               在工具清单里把权限改成「只改文件」（access: standard）时改用 auto_args
 #   readonly_args 只读模式参数，用于规划和评审
 #   auth_errors / limit_errors  输出中表示"未登录"/"限流或额度用完"的关键字（不区分大小写）
 #   以上参数随工具版本变化，默认值按常见版本填写，可在界面「工具清单」里直接修改。
@@ -27,6 +29,7 @@ tools:
     headless: ["-p", "{prompt}"]
     usage_args: ["--output-format", "json"]
     auto_args: ["--permission-mode", "acceptEdits"]
+    full_args: ["--permission-mode", "bypassPermissions"]
     stream_args: ["--output-format", "stream-json", "--verbose"]
     readonly_args: ["--permission-mode", "plan"]
     auth_errors: ["not logged in", "please run /login", "invalid api key", "failed to authenticate", "oauth session expired", "oauth token has expired", "authentication_error"]
@@ -42,6 +45,7 @@ tools:
     headless: ["exec", "{prompt}"]
     usage_args: ["--json"]
     auto_args: ["--sandbox", "workspace-write"]
+    full_args: ["--dangerously-bypass-approvals-and-sandbox"]
     readonly_args: ["--sandbox", "read-only"]
     auth_errors: ["not logged in", "please login", "401 unauthorized"]
     limit_errors: ["rate limit", "usage limit", "429"]
@@ -70,6 +74,7 @@ tools:
     headless: ["-p", "{prompt}"]
     usage_args: ["--output-format", "json"]
     auto_args: ["--approval-mode", "auto_edit"]
+    full_args: ["--approval-mode", "yolo"]
     auth_errors: ["login required", "authentication"]
     limit_errors: ["quota", "rate limit", "429"]
     capability: 85
@@ -83,6 +88,7 @@ tools:
     headless: ["-p", "{prompt}"]
     usage_args: ["--output-format", "json"]
     auto_args: ["--approval-mode", "auto-edit"]
+    full_args: ["--approval-mode", "yolo"]
     auth_errors: ["login required", "authentication"]
     limit_errors: ["quota", "rate limit", "429"]
     capability: 75

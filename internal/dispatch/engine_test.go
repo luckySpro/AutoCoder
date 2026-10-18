@@ -313,3 +313,17 @@ func TestCodexEvents(t *testing.T) {
 		t.Fatalf("final=%q usage=%+v", p.final, p.usage)
 	}
 }
+
+// 「全部重试」：受阻的任务一次放回队列，尝试次数清零，换好环境后能直接跑通。
+func TestRetryBlocked(t *testing.T) {
+	t.Setenv("FAKE_MODE", "noop")
+	e := setup(t, "")
+	id := e.addTask(t, project.Task{Title: "先受阻"})
+	e.waitStatus(t, id, project.Blocked)
+	t.Setenv("FAKE_MODE", "")
+	ids, err := e.eng.RetryBlocked(e.p.ID)
+	if err != nil || len(ids) != 1 || ids[0] != id {
+		t.Fatalf("ids=%v err=%v", ids, err)
+	}
+	e.waitStatus(t, id, project.Merged)
+}

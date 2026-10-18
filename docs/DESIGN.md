@@ -239,7 +239,8 @@ planned ─依赖全部合并─▶ ready ─派发─▶ running ─进程结�
 
 | 字段 | 作用 | 示例（以实际安装版本验证为准） |
 |---|---|---|
-| `auto_args` | 免确认、限定在工作目录内修改 | Claude Code 的权限模式参数，Codex 的工作区写入沙箱 + 不询问审批 |
+| `full_args` | 最高权限：直接执行命令、联网安装依赖、不再询问（默认使用） | Claude `--permission-mode bypassPermissions`，Codex `--dangerously-bypass-approvals-and-sandbox` |
+| `auto_args` | 只改文件、命令要批准；工具的「运行权限」选「只改文件」（`access: standard`）时使用 | Claude `--permission-mode acceptEdits`，Codex `--sandbox workspace-write` |
 | `stream_args` | 输出可解析的事件流，用于过程反馈 | Claude `--output-format stream-json`，Codex `--json` |
 | `readonly_args` | 只读模式，用于规划和评审 | 只允许读文件的权限设置 |
 | `auth_errors` / `limit_errors` | 识别"未登录"和"限流 / 额度用完"的输出关键字 | `not logged in`、`rate limit`、`429` |

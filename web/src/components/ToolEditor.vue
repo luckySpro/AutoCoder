@@ -22,6 +22,8 @@ const f = reactive({
   headless: join(props.tool?.headless ?? ['-p', '{prompt}']),
   usageArgs: join(props.tool?.usageArgs),
   autoArgs: join(props.tool?.autoArgs),
+  fullArgs: join(props.tool?.fullArgs),
+  access: props.tool?.access === 'standard' ? 'standard' : 'full',
   streamArgs: join(props.tool?.streamArgs),
   readonlyArgs: join(props.tool?.readonlyArgs),
   authErrors: (props.tool?.authErrors ?? []).join('\n'),
@@ -51,7 +53,8 @@ const firstCmd = computed(() => split(f.commands)[0] || '<命令>')
 // 与后端 Tool.Args 一致：无人值守与事件流参数插在提示词之前（提示词前紧挨的选项如 -p 一起后移）
 const preview = computed(() => {
   const h = split(f.headless)
-  const extra = [...split(f.autoArgs), ...(split(f.streamArgs).length ? split(f.streamArgs) : split(f.usageArgs))]
+  const perm = f.access !== 'standard' && split(f.fullArgs).length ? split(f.fullArgs) : split(f.autoArgs)
+  const extra = [...perm, ...(split(f.streamArgs).length ? split(f.streamArgs) : split(f.usageArgs))]
   let at = h.indexOf('{prompt}')
   if (at < 0) at = h.length
   else if (at > 0 && h[at - 1].startsWith('-')) at--
@@ -68,7 +71,7 @@ function toSpec(): ToolSpec {
   return {
     id: f.id, name: f.name.trim(), vendor: f.vendor.trim(), commands: split(f.commands), paths,
     versionArgs: split(f.versionArgs), headless: split(f.headless), usageArgs: opt(split(f.usageArgs)),
-    autoArgs: opt(split(f.autoArgs)), streamArgs: opt(split(f.streamArgs)), readonlyArgs: opt(split(f.readonlyArgs)),
+    autoArgs: opt(split(f.autoArgs)), fullArgs: opt(split(f.fullArgs)), access: f.access === 'standard' ? 'standard' : undefined, streamArgs: opt(split(f.streamArgs)), readonlyArgs: opt(split(f.readonlyArgs)),
     authErrors: opt(lines(f.authErrors)), limitErrors: opt(lines(f.limitErrors)),
     capability: Number(f.capability), strengths: f.strengths, disabled: f.disabled,
   }
@@ -130,9 +133,20 @@ const err = (k: string) => (touched.value ? errors.value[k] : '')
             <input id="ed-headless" v-model="f.headless" class="mono" placeholder="-p {prompt}" :aria-invalid="!!err('headless')" />
             <span v-if="err('headless')" class="err">{{ err('headless') }}</span>
           </label>
-          <label class="field">无人值守参数 <span class="help">免确认、只在任务目录里修改；没有它工具可能停下来等你回答</span>
-            <input v-model="f.autoArgs" class="mono" placeholder="--permission-mode acceptEdits" />
+          <label class="field">运行权限 <span class="help">最高权限下工具可以直接执行命令、联网安装依赖，不会停下来等批准</span>
+            <select v-model="f.access">
+              <option value="full">最高权限（默认）</option>
+              <option value="standard">只改文件，命令要批准</option>
+            </select>
           </label>
+          <div class="grid2">
+            <label class="field">最高权限参数 <span class="help">权限选「最高权限」时使用</span>
+              <input v-model="f.fullArgs" class="mono" placeholder="--permission-mode bypassPermissions" />
+            </label>
+            <label class="field">只改文件参数 <span class="help">权限选「只改文件」，或没填最高权限参数时使用</span>
+              <input v-model="f.autoArgs" class="mono" placeholder="--permission-mode acceptEdits" />
+            </label>
+          </div>
           <div class="grid2">
             <label class="field">事件流参数 <span class="help">实时查看过程用</span>
               <input v-model="f.streamArgs" class="mono" placeholder="--output-format stream-json" />

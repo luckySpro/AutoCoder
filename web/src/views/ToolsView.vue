@@ -31,6 +31,13 @@ async function toggle(t: ToolDetection) {
   flash(t.disabled ? `已启用 ${t.name}` : `已停用 ${t.name}`)
 }
 
+// 卡片上直接切换运行权限
+async function setAccess(t: ToolDetection, access: string) {
+  await saveTool({ ...specOf(t), access: access === 'standard' ? 'standard' : undefined })
+  flash(access === 'standard' ? `${t.name} 改为只改文件，命令要批准` : `${t.name} 改为最高权限`)
+}
+const accessOf = (t: ToolDetection) => (t.access === 'standard' || !t.fullArgs?.length ? 'standard' : 'full')
+
 async function remove(t: ToolDetection) {
   if (confirmId.value !== t.id) {
     confirmId.value = t.id
@@ -138,6 +145,11 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
             <div class="cap" :title="`能力评分 ${t.capability}`"><span :style="{ width: t.capability + '%' }"></span></div>
           </div>
           <div class="ops">
+            <select class="access" :value="accessOf(t)" :disabled="store.demo || (!t.fullArgs?.length && accessOf(t) === 'standard')" :aria-label="`${t.name} 的运行权限`"
+              :title="t.fullArgs?.length ? '派发任务时工具的权限' : '这个工具没有配置最高权限参数，可在编辑里补上'" @change="setAccess(t, ($event.target as HTMLSelectElement).value)">
+              <option value="full">最高权限</option>
+              <option value="standard">只改文件</option>
+            </select>
             <label class="switch" :title="t.disabled ? '启用' : '停用'">
               <input type="checkbox" :checked="!t.disabled" :aria-label="`${t.name} 参与协同`" @change="toggle(t)" />
               <span></span>
@@ -204,6 +216,7 @@ const sourceLabel = { builtin: '内置', modified: '已修改', custom: '自定�
 .ops { display: flex; align-items: center; gap: 4px; }
 .ops .switch { margin-right: 6px; }
 a.btn { text-decoration: none; }
+.access { height: 28px; font-size: 12px; padding: 0 6px; width: auto; }
 a.btn.disabled { opacity: 0.5; pointer-events: none; }
 .narrow { width: min(560px, 100%); }
 .im { display: grid; gap: 12px; }
