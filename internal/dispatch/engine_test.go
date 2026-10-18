@@ -176,20 +176,17 @@ func TestHappyPathToDelivery(t *testing.T) {
 	}
 	// 开启自动合并且有测试命令：全部任务合并后自动交付到主分支（主目录检出 main 且干净，快进）
 	deadline := time.Now().Add(10 * time.Second)
+	// 交付在后台进行：文件先出现、交付说明随后写入，等整个交付完成再检查
 	for {
-		if _, err := os.Stat(filepath.Join(e.p.Path, "src", "hello.txt")); err == nil {
+		_, errHello := os.Stat(filepath.Join(e.p.Path, "src", "hello.txt"))
+		_, errNote := os.Stat(filepath.Join(e.p.Path, ".autocoder", "deliveries", "D1.md"))
+		if errHello == nil && errNote == nil && gitops.IsClean(e.ctx, e.p.Path) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("主目录应快进到交付结果")
+			t.Fatalf("主目录应快进到交付结果、有交付说明且保持干净（hello=%v note=%v）", errHello, errNote)
 		}
 		time.Sleep(50 * time.Millisecond)
-	}
-	if _, err := os.Stat(filepath.Join(e.p.Path, ".autocoder", "deliveries", "D1.md")); err != nil {
-		t.Fatal("应有交付说明")
-	}
-	if !gitops.IsClean(e.ctx, e.p.Path) {
-		t.Fatal("交付后主目录应保持干净")
 	}
 	if _, err := e.eng.Deliver(e.ctx, "demo"); err == nil {
 		t.Fatal("没有新内容时不应再次交付")
