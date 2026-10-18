@@ -26,10 +26,13 @@ async function focusTask(id: string) {
   await nextTick()
   detailEl.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
-watch(() => [route.query.task, project.value?.tasks.length], () => {
+// 只在链接里的任务编号变化（或该任务刚加载出来）时跳一次；
+// 不能直接 watch 一个新数组，否则每次定时刷新数据都会重新跳到详情
+const linked = computed(() => {
   const id = route.query.task
-  if (typeof id === 'string' && project.value?.tasks.some((t) => t.id === id)) focusTask(id)
-}, { immediate: true })
+  return typeof id === 'string' && project.value?.tasks.some((t) => t.id === id) ? id : ''
+})
+watch(linked, (id) => { if (id) focusTask(id) }, { immediate: true })
 
 const columns = computed(() => {
   const ts = project.value?.tasks ?? []
